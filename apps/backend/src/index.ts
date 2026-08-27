@@ -13,6 +13,8 @@ import subjectsRouter from './api/subjects';
 import classesRouter from './api/classes';
 import honorRatesRouter from './api/honorRates';
 import exportRouter from './api/export';
+import schedulesRouter from './api/schedules';
+import dashboardRouter from './api/dashboard';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -42,6 +44,8 @@ app.use('/api/subjects', subjectsRouter);
 app.use('/api/classes', classesRouter);
 app.use('/api/honor-rates', honorRatesRouter);
 app.use('/api/export', exportRouter);
+app.use('/api/schedules', schedulesRouter);
+app.use('/api/dashboard', dashboardRouter);
 
 // 404 handler
 app.use((req, res) => {

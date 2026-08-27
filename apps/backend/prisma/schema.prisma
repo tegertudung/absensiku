@@ -74,6 +74,7 @@ model Student {
 
   packages PrivatePackage[]
   sessions TeachingSession[]
+  schedules Schedule[]
 
   @@index([status])
 }
@@ -91,6 +92,7 @@ model Subject {
 
   classes Class[]
   sessions TeachingSession[]
+  schedules Schedule[]
 
   @@index([isActive])
 }
@@ -157,6 +159,8 @@ model Schedule {
 
   tutor Tutor @relation(fields: [tutorId], references: [id], onDelete: Cascade)
   class Class? @relation(fields: [classId], references: [id], onDelete: SetNull)
+  student Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  subject Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
   sessions TeachingSession[]
 
   @@index([tutorId])
