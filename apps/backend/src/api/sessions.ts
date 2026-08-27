@@ -13,6 +13,7 @@ import {
   resolveTutorIdForUser,
 } from '../services/sessionService';
 import { recordAttendance, getAttendanceForSession } from '../services/attendanceService';
+import { lockOverdueSessions } from '../jobs/lockOverdueSessions';
 
 const router = Router();
 
@@ -104,6 +105,24 @@ router.post('/:id/cancel', requireAuth, requireRole('TENTOR', 'ADMIN'), async (r
     handleError(err, res);
   }
 });
+
+// ============================================
+// POST /api/sessions/lock-overdue — manually trigger the BR-07 overdue sweep
+// (normally runs hourly via cron; this lets admin force-check immediately)
+// ============================================
+router.post(
+  '/lock-overdue',
+  requireAuth,
+  requireRole('ADMIN'),
+  async (_req: Request, res: Response) => {
+    try {
+      const count = await lockOverdueSessions();
+      res.json({ success: true, data: { lockedCount: count } });
+    } catch (err) {
+      handleError(err, res);
+    }
+  }
+);
 
 // ============================================
 // GET /api/sessions/validations/pending — admin queue

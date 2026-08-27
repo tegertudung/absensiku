@@ -16,6 +16,7 @@ import exportRouter from './api/export';
 import schedulesRouter from './api/schedules';
 import dashboardRouter from './api/dashboard';
 import privatePackagesRouter from './api/privatePackages';
+import { startOverdueSessionLockJob } from './jobs/lockOverdueSessions';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -79,6 +80,8 @@ app.listen(PORT, () => {
 ║ Health:      /api/health            ║
 ╚════════════════════════════════════════╝
   `);
+
+  startOverdueSessionLockJob();
 });
 
 process.on('unhandledRejection', (reason: Error) => {

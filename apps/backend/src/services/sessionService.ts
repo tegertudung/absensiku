@@ -13,6 +13,23 @@ export class SessionError extends Error {
 // COMPLETED and CANCELLED_NOT_COUNTED are terminal (BR-13: further changes need admin correction with audit trail).
 const OPEN_STATUSES = ['SCHEDULED', 'IN_PROGRESS', 'PENDING_ADMIN'];
 
+// BR-07/AC-05: tentor loses edit rights 3 days after the session date.
+export const OVERDUE_DAYS = 3;
+
+/**
+ * Synchronous backstop for AC-05, independent of the hourly lock job (see
+ * jobs/lockOverdueSessions.ts) — closes the up-to-1-hour gap between a
+ * session becoming overdue and the next cron tick. A tentor cannot act on an
+ * overdue session even if its status hasn't been flipped to PENDING_ADMIN
+ * yet; admin is never subject to this (actingTutorId is null for admin).
+ */
+export function isOverdue(sessionDate: Date): boolean {
+  const cutoff = new Date();
+  cutoff.setUTCHours(0, 0, 0, 0);
+  cutoff.setUTCDate(cutoff.getUTCDate() - OVERDUE_DAYS);
+  return sessionDate.getTime() < cutoff.getTime();
+}
+
 /**
  * Resolve a logged-in user's Tutor profile id, if any.
  * Used to scope TENTOR-role requests to their own data (Kontrol Akses in the spec).
@@ -96,6 +113,13 @@ export async function completeSession(
 
     assertOwnership(actingTutorId, session.tutorId);
 
+    if (actingTutorId && isOverdue(session.sessionDate)) {
+      throw new SessionError(
+        `Sesi ini sudah melewati batas ${OVERDUE_DAYS} hari dan terkunci dari tentor. Hubungi admin untuk penyelesaian.`,
+        409
+      );
+    }
+
     if (!OPEN_STATUSES.includes(session.status)) {
       throw new SessionError(`Sesi berstatus "${session.status}" tidak dapat diselesaikan`, 409);
     }
@@ -177,6 +201,13 @@ export async function reportCancellation(
     if (!session) throw new SessionError('Sesi tidak ditemukan', 404);
 
     assertOwnership(actingTutorId, session.tutorId);
+
+    if (actingTutorId && isOverdue(session.sessionDate)) {
+      throw new SessionError(
+        `Sesi ini sudah melewati batas ${OVERDUE_DAYS} hari dan terkunci dari tentor. Hubungi admin untuk penyelesaian.`,
+        409
+      );
+    }
 
     if (!OPEN_STATUSES.includes(session.status)) {
       throw new SessionError(`Sesi berstatus "${session.status}" tidak dapat dibatalkan`, 409);

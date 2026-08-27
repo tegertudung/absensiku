@@ -1,5 +1,6 @@
 import { prisma } from '../utils/prisma';
 import { AppError } from '../utils/errors';
+import { isOverdue, OVERDUE_DAYS } from './sessionService';
 
 // Same as sessionService's OPEN_STATUSES — a tentor can only edit attendance
 // while the session isn't finalized yet. Once locked, only admin can correct it.
@@ -29,6 +30,12 @@ export async function recordAttendance(
     if (actingTutorId) {
       if (session.tutorId !== actingTutorId) {
         throw new AppError('Anda tidak memiliki akses ke sesi ini', 403);
+      }
+      if (isOverdue(session.sessionDate)) {
+        throw new AppError(
+          `Sesi ini sudah melewati batas ${OVERDUE_DAYS} hari dan terkunci dari tentor. Hubungi admin untuk koreksi.`,
+          409
+        );
       }
       if (!EDITABLE_STATUSES.includes(session.status)) {
         throw new AppError(
