@@ -177,7 +177,7 @@ router.post(
 // GET /api/sessions — list with filters. TENTOR is scoped to their own sessions.
 // ============================================
 router.get('/', requireAuth, async (req: Request, res: Response) => {
-  const { status, sessionType, startDate, endDate, tutorId, classId, dayOfWeek, hour } = req.query;
+  const { status, sessionType, startDate, endDate, tutorId, classId, studentId, dayOfWeek, hour } = req.query;
 
   let scopedTutorId: string | undefined;
 
@@ -200,6 +200,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       startDate: typeof startDate === 'string' ? new Date(startDate) : undefined,
       endDate: typeof endDate === 'string' ? new Date(endDate) : undefined,
       classId: typeof classId === 'string' ? classId : undefined,
+      studentId: typeof studentId === 'string' ? studentId : undefined,
       dayOfWeek: typeof dayOfWeek === 'string' ? Number(dayOfWeek) : undefined,
       hour: typeof hour === 'string' ? hour : undefined,
     });

@@ -14,6 +14,15 @@ interface SessionRow {
   class: { name: string } | null;
   student: { name: string } | null;
   subject: { name: string } | null;
+  schedule: { startTime: string } | null;
+}
+
+function formatHariJam(session: SessionRow): string {
+  const hari = DAY_NAMES[new Date(session.sessionDate).getUTCDay()];
+  if (!session.schedule?.startTime) return hari;
+  const t = new Date(session.schedule.startTime);
+  const jam = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+  return `${hari}, ${jam}`;
 }
 
 interface Option {
@@ -227,24 +236,26 @@ export default function AdminRecapPage() {
           <thead>
             <tr className="border-b border-gray-200 text-left text-gray-500">
               <th className="px-4 py-3 font-medium">Tanggal</th>
+              <th className="px-4 py-3 font-medium">Hari/Jam</th>
               <th className="px-4 py-3 font-medium">Tentor</th>
               <th className="px-4 py-3 font-medium">Jenis</th>
               <th className="px-4 py-3 font-medium">Kelas/Siswa</th>
               <th className="px-4 py-3 font-medium">Mapel</th>
               <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 font-medium">Tarif Sesi</th>
               <th className="px-4 py-3 font-medium">Honor</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-gray-400">
+                <td colSpan={9} className="px-4 py-6 text-center text-gray-400">
                   Memuat...
                 </td>
               </tr>
             ) : sessions.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-gray-400">
+                <td colSpan={9} className="px-4 py-6 text-center text-gray-400">
                   Tidak ada data untuk filter ini.
                 </td>
               </tr>
@@ -252,6 +263,7 @@ export default function AdminRecapPage() {
               sessions.map((s) => (
                 <tr key={s.id} className="border-b border-gray-100 last:border-0">
                   <td className="px-4 py-3 text-gray-600">{formatDate(s.sessionDate)}</td>
+                  <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{formatHariJam(s)}</td>
                   <td className="px-4 py-3 text-gray-900">{s.tutor.name}</td>
                   <td className="px-4 py-3 text-gray-600">{SESSION_TYPE_LABELS[s.sessionType]}</td>
                   <td className="px-4 py-3 text-gray-600">
@@ -262,6 +274,9 @@ export default function AdminRecapPage() {
                     <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
                       {SESSION_STATUS_LABELS[s.status] ?? s.status}
                     </span>
+                  </td>
+                  <td className="px-4 py-3 text-gray-600">
+                    {s.status === 'COMPLETED' ? formatRupiah(s.honorRateSnapshot) : '-'}
                   </td>
                   <td className="px-4 py-3 text-gray-900 font-medium">
                     {s.status === 'COMPLETED' ? formatRupiah(s.honorRateSnapshot) : '-'}

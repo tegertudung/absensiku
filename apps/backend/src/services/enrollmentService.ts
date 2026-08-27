@@ -28,6 +28,19 @@ export async function listClassEnrollments(classId: string) {
   });
 }
 
+/**
+ * Reverse lookup: module 4 ("Data Siswa: ... kelas reguler ...") requires
+ * seeing which classes a STUDENT belongs to, not just a class's roster.
+ * listClassEnrollments above only answers the class -> students direction.
+ */
+export async function listEnrollmentsForStudent(studentId: string) {
+  return prisma.classEnrollment.findMany({
+    where: { studentId, status: 'ACTIVE' },
+    include: { class: { select: { name: true, level: true } } },
+    orderBy: { enrollmentDate: 'asc' },
+  });
+}
+
 export async function setEnrollmentStatus(
   classId: string,
   studentId: string,

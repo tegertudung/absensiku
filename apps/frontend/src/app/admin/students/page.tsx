@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import api from '@/lib/api';
 import Modal from '@/components/Modal';
 import { formatDate } from '@/lib/format';
@@ -198,7 +199,11 @@ export default function AdminStudentsPage() {
             ) : (
               students.map((s) => (
                 <tr key={s.id} className="border-b border-gray-100 last:border-0">
-                  <td className="px-4 py-3 text-gray-900">{s.name}</td>
+                  <td className="px-4 py-3 text-gray-900">
+                    <Link href={`/admin/students/${s.id}`} className="text-blue-600 hover:underline">
+                      {s.name}
+                    </Link>
+                  </td>
                   <td className="px-4 py-3 text-gray-600">{s.phone || '-'}</td>
                   <td className="px-4 py-3 text-gray-600">
                     {s.guardianName ? `${s.guardianName} (${s.guardianPhone || '-'})` : '-'}

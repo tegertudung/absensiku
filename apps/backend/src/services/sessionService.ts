@@ -303,6 +303,7 @@ export async function listSessions(filters: {
   startDate?: Date;
   endDate?: Date;
   classId?: string;
+  studentId?: string;
   dayOfWeek?: number;
   hour?: string; // "HH:mm"
 }) {
@@ -312,6 +313,7 @@ export async function listSessions(filters: {
       status: filters.status as any,
       sessionType: filters.sessionType as any,
       classId: filters.classId,
+      studentId: filters.studentId,
       sessionDate:
         filters.startDate || filters.endDate
           ? { gte: filters.startDate, lte: filters.endDate }

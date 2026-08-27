@@ -9,6 +9,7 @@ import {
   updateStudent,
   setStudentStatus,
 } from '../services/studentService';
+import { listEnrollmentsForStudent } from '../services/enrollmentService';
 
 const router = Router();
 
@@ -47,6 +48,15 @@ router.get('/', requireAuth, requireRole('ADMIN'), async (_req: Request, res: Re
 router.get('/:id', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
   try {
     res.json({ success: true, data: await getStudentById(req.params.id) });
+  } catch (err) {
+    handleError(err, res);
+  }
+});
+
+// GET /api/students/:id/classes — module 4: "kelas reguler" from the student's side
+router.get('/:id/classes', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
+  try {
+    res.json({ success: true, data: await listEnrollmentsForStudent(req.params.id) });
   } catch (err) {
     handleError(err, res);
   }
