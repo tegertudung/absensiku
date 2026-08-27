@@ -269,7 +269,11 @@ model PrivatePackage {
 model PrivatePackageUsage {
   id               String   @id @default(uuid())
   packageId        String
-  sessionId        String
+  // Nullable: SESSION_COMPLETED entries are tied to a session, but
+  // ADMIN_ADJUSTMENT entries (package activation, quota top-up) are not.
+  sessionId        String?
+  // Signed ledger: positive = quota consumed, negative = quota credited
+  // (top-up, initial activation grant, cancellation refund).
   quantityUsed     Int      @default(1)
   changeType       String   // 'SESSION_COMPLETED' | 'ADMIN_ADJUSTMENT' | 'CANCELLATION_REFUND'
   changedBy        String?
@@ -277,7 +281,7 @@ model PrivatePackageUsage {
   reason           String?
 
   package PrivatePackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
-  session TeachingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session TeachingSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([packageId])
   @@index([sessionId])

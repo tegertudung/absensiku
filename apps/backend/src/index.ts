@@ -15,6 +15,7 @@ import honorRatesRouter from './api/honorRates';
 import exportRouter from './api/export';
 import schedulesRouter from './api/schedules';
 import dashboardRouter from './api/dashboard';
+import privatePackagesRouter from './api/privatePackages';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -46,6 +47,7 @@ app.use('/api/honor-rates', honorRatesRouter);
 app.use('/api/export', exportRouter);
 app.use('/api/schedules', schedulesRouter);
 app.use('/api/dashboard', dashboardRouter);
+app.use('/api/private-packages', privatePackagesRouter);
 
 // 404 handler
 app.use((req, res) => {
