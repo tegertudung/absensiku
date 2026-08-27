@@ -40,6 +40,7 @@ export default function AdminSchedulesPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [conflictWarning, setConflictWarning] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     tutorId: '',
@@ -96,7 +97,7 @@ export default function AdminSchedulesPage() {
 
     setSaving(true);
     try {
-      await api.post('/schedules', {
+      const res = await api.post('/schedules', {
         tutorId: form.tutorId,
         sessionType: form.sessionType,
         classId: form.sessionType === 'REGULAR' ? form.classId : undefined,
@@ -107,6 +108,18 @@ export default function AdminSchedulesPage() {
         endTime: form.endTime,
         startDate: form.startDate,
       });
+
+      const conflicts = res.data.data.conflicts as Array<{ label: string; startTime: string; endTime: string }>;
+      if (conflicts?.length > 0) {
+        setConflictWarning(
+          `Jadwal ini bentrok dengan: ${conflicts
+            .map((c) => `${c.label} (${c.startTime}–${c.endTime})`)
+            .join(', ')}. Jadwal tetap disimpan — tentor sudah diberi tahu.`
+        );
+      } else {
+        setConflictWarning(null);
+      }
+
       setShowForm(false);
       await load();
     } catch (err: any) {
@@ -137,6 +150,15 @@ export default function AdminSchedulesPage() {
           + Tambah Jadwal
         </button>
       </div>
+
+      {conflictWarning && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-md px-4 py-3 mb-4 flex justify-between items-start gap-3">
+          <span>⚠ {conflictWarning}</span>
+          <button onClick={() => setConflictWarning(null)} className="text-amber-600 text-xs shrink-0">
+            Tutup
+          </button>
+        </div>
+      )}
 
       <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
         <table className="w-full text-sm">

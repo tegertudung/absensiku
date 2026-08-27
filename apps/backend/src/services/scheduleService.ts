@@ -14,7 +14,8 @@ async function notifyTutorOfSchedule(
   title: string,
   dayOfWeek: number,
   startTime: Date,
-  endTime: Date
+  endTime: Date,
+  type: string = 'SCHEDULE_CHANGE'
 ) {
   const tutor = await prisma.tutor.findUnique({ where: { id: tutorId } });
   if (!tutor) return;
@@ -23,8 +24,69 @@ async function notifyTutorOfSchedule(
     userId: tutor.userId,
     title,
     message: `${DAY_NAMES[dayOfWeek]}, ${formatScheduleTime(startTime)}–${formatScheduleTime(endTime)}`,
-    type: 'SCHEDULE_CHANGE',
+    type,
   });
+}
+
+function timeToMinutes(d: Date): number {
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+export interface ScheduleConflict {
+  scheduleId: string;
+  sessionType: string;
+  label: string;
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+}
+
+/**
+ * Section J: "kelas bentrok" — two ACTIVE schedules for the same tutor on the
+ * same day of week whose time ranges overlap. Same-tutor-same-time is
+ * physically impossible regardless of whether either schedule is REGULAR or
+ * PRIVATE, so sessionType is intentionally not part of the filter. Compared
+ * as minutes-since-midnight rather than raw DateTime, since startTime/endTime
+ * are stored combined with an arbitrary date — only the time-of-day matters
+ * for a recurring weekly schedule.
+ */
+async function findScheduleConflicts(
+  tutorId: string,
+  dayOfWeek: number,
+  startTime: Date,
+  endTime: Date,
+  excludeScheduleId?: string
+): Promise<ScheduleConflict[]> {
+  const candidates = await prisma.schedule.findMany({
+    where: {
+      tutorId,
+      dayOfWeek,
+      status: 'ACTIVE',
+      id: excludeScheduleId ? { not: excludeScheduleId } : undefined,
+    },
+    include: {
+      class: { select: { name: true } },
+      student: { select: { name: true } },
+    },
+  });
+
+  const newStart = timeToMinutes(startTime);
+  const newEnd = timeToMinutes(endTime);
+
+  return candidates
+    .filter((c) => {
+      const cStart = timeToMinutes(c.startTime);
+      const cEnd = timeToMinutes(c.endTime);
+      return cStart < newEnd && cEnd > newStart; // classic interval overlap test
+    })
+    .map((c) => ({
+      scheduleId: c.id,
+      sessionType: c.sessionType,
+      label: c.sessionType === 'REGULAR' ? c.class?.name ?? '-' : c.student?.name ?? '-',
+      dayOfWeek: c.dayOfWeek,
+      startTime: formatScheduleTime(c.startTime),
+      endTime: formatScheduleTime(c.endTime),
+    }));
 }
 
 export async function createSchedule(data: {
@@ -54,6 +116,8 @@ export async function createSchedule(data: {
     throw new AppError('Jam mulai harus sebelum jam selesai', 400);
   }
 
+  const conflicts = await findScheduleConflicts(data.tutorId, data.dayOfWeek, data.startTime, data.endTime);
+
   const schedule = await prisma.schedule.create({
     data: {
       tutorId: data.tutorId,
@@ -79,7 +143,21 @@ export async function createSchedule(data: {
     data.endTime
   );
 
-  return schedule;
+  if (conflicts.length > 0) {
+    await notifyTutorOfSchedule(
+      data.tutorId,
+      `Jadwal bentrok terdeteksi dengan ${conflicts.length} jadwal lain`,
+      data.dayOfWeek,
+      data.startTime,
+      data.endTime,
+      'SCHEDULE_CONFLICT'
+    );
+  }
+
+  // Merged onto the schedule object so existing callers reading plain schedule
+  // fields (id, tutorId, ...) are unaffected; new callers can check `.conflicts`
+  // for an immediate inline warning without waiting on the notification.
+  return { ...schedule, conflicts };
 }
 
 export async function listSchedules(filters: {
@@ -141,7 +219,17 @@ export async function updateSchedule(
 
   const updated = await prisma.schedule.update({ where: { id }, data });
 
+  let conflicts: ScheduleConflict[] = [];
+
   if (data.dayOfWeek !== undefined || data.startTime || data.endTime) {
+    conflicts = await findScheduleConflicts(
+      updated.tutorId,
+      updated.dayOfWeek,
+      updated.startTime,
+      updated.endTime,
+      id
+    );
+
     await notifyTutorOfSchedule(
       updated.tutorId,
       'Jadwal Anda diubah',
@@ -149,9 +237,20 @@ export async function updateSchedule(
       updated.startTime,
       updated.endTime
     );
+
+    if (conflicts.length > 0) {
+      await notifyTutorOfSchedule(
+        updated.tutorId,
+        `Jadwal bentrok terdeteksi dengan ${conflicts.length} jadwal lain`,
+        updated.dayOfWeek,
+        updated.startTime,
+        updated.endTime,
+        'SCHEDULE_CONFLICT'
+      );
+    }
   }
 
-  return updated;
+  return { ...updated, conflicts };
 }
 
 export async function setScheduleStatus(
