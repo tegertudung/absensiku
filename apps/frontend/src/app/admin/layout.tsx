@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: '/admin/dashboard', label: 'Dashboard' },
   { href: '/admin/tutors', label: 'Tentor' },
   { href: '/admin/students', label: 'Siswa' },
+  { href: '/admin/classes', label: 'Kelas & Mapel' },
   { href: '/admin/schedules', label: 'Jadwal' },
   { href: '/admin/validations', label: 'Validasi' },
   { href: '/admin/recap', label: 'Rekap & Honor' },
