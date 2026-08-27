@@ -1,5 +1,6 @@
 import { prisma } from '../utils/prisma';
 import { AppError } from '../utils/errors';
+import { logAudit } from '../utils/auditLog';
 
 /**
  * BR-02/alur H.2 step 1: admin activates a private package for a student.
@@ -121,8 +122,25 @@ export async function getPackageById(id: string) {
   return pkg;
 }
 
-export async function setPackageStatus(id: string, status: 'ACTIVE' | 'EXPIRED' | 'CANCELLED') {
+export async function setPackageStatus(
+  id: string,
+  status: 'ACTIVE' | 'EXPIRED' | 'CANCELLED',
+  adminId: string
+) {
   const pkg = await prisma.privatePackage.findUnique({ where: { id } });
   if (!pkg) throw new AppError('Paket tidak ditemukan', 404);
-  return prisma.privatePackage.update({ where: { id }, data: { status } });
+
+  const updated = await prisma.privatePackage.update({ where: { id }, data: { status } });
+
+  await logAudit({
+    tableName: 'private_packages',
+    recordId: id,
+    action: 'UPDATE',
+    oldValues: { status: pkg.status },
+    newValues: { status: updated.status },
+    changedBy: adminId,
+    reason: `Ubah status paket menjadi ${status}`,
+  });
+
+  return updated;
 }

@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '../utils/prisma';
 import { AppError } from '../utils/errors';
+import { logAudit } from '../utils/auditLog';
 
 const SALT_ROUNDS = 10;
 
@@ -83,15 +84,27 @@ export async function updateTutor(
  * Deactivating a tutor also disables their login (isActive on the linked User),
  * consistent with the module description "Tambah, ubah, nonaktifkan" (BR access control).
  */
-export async function setTutorActive(id: string, isActive: boolean) {
+export async function setTutorActive(id: string, isActive: boolean, adminId: string) {
   const tutor = await prisma.tutor.findUnique({ where: { id } });
   if (!tutor) throw new AppError('Tentor tidak ditemukan', 404);
 
-  return prisma.$transaction(async (tx) => {
+  const updated = await prisma.$transaction(async (tx) => {
     await tx.user.update({ where: { id: tutor.userId }, data: { isActive } });
     return tx.tutor.update({
       where: { id },
       data: { status: isActive ? 'ACTIVE' : 'INACTIVE' },
     });
   });
+
+  await logAudit({
+    tableName: 'tutors',
+    recordId: id,
+    action: 'UPDATE',
+    oldValues: { status: tutor.status },
+    newValues: { status: updated.status },
+    changedBy: adminId,
+    reason: isActive ? 'Aktifkan tentor' : 'Nonaktifkan tentor',
+  });
+
+  return updated;
 }

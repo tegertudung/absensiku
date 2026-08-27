@@ -88,7 +88,7 @@ router.put('/:id', requireAuth, requireRole('ADMIN'), async (req: Request, res: 
 // PATCH /api/tutors/:id/deactivate
 router.patch('/:id/deactivate', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
   try {
-    res.json({ success: true, data: await setTutorActive(req.params.id, false) });
+    res.json({ success: true, data: await setTutorActive(req.params.id, false, req.user!.userId) });
   } catch (err) {
     handleError(err, res);
   }
@@ -97,7 +97,7 @@ router.patch('/:id/deactivate', requireAuth, requireRole('ADMIN'), async (req: R
 // PATCH /api/tutors/:id/activate
 router.patch('/:id/activate', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
   try {
-    res.json({ success: true, data: await setTutorActive(req.params.id, true) });
+    res.json({ success: true, data: await setTutorActive(req.params.id, true, req.user!.userId) });
   } catch (err) {
     handleError(err, res);
   }

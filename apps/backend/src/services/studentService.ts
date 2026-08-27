@@ -1,5 +1,6 @@
 import { prisma } from '../utils/prisma';
 import { AppError } from '../utils/errors';
+import { logAudit } from '../utils/auditLog';
 
 export async function createStudent(data: {
   name: string;
@@ -35,8 +36,25 @@ export async function updateStudent(
   return prisma.student.update({ where: { id }, data });
 }
 
-export async function setStudentStatus(id: string, status: 'ACTIVE' | 'INACTIVE' | 'GRADUATED') {
+export async function setStudentStatus(
+  id: string,
+  status: 'ACTIVE' | 'INACTIVE' | 'GRADUATED',
+  adminId: string
+) {
   const student = await prisma.student.findUnique({ where: { id } });
   if (!student) throw new AppError('Siswa tidak ditemukan', 404);
-  return prisma.student.update({ where: { id }, data: { status } });
+
+  const updated = await prisma.student.update({ where: { id }, data: { status } });
+
+  await logAudit({
+    tableName: 'students',
+    recordId: id,
+    action: 'UPDATE',
+    oldValues: { status: student.status },
+    newValues: { status: updated.status },
+    changedBy: adminId,
+    reason: `Ubah status siswa menjadi ${status}`,
+  });
+
+  return updated;
 }

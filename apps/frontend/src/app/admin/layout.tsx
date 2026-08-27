@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { href: '/admin/validations', label: 'Validasi' },
   { href: '/admin/recap', label: 'Rekap & Honor' },
   { href: '/admin/honor-rates', label: 'Master Honor' },
+  { href: '/admin/audit-log', label: 'Audit Log' },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

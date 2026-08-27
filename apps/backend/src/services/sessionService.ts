@@ -1,5 +1,6 @@
 import { prisma } from '../utils/prisma';
 import { getApplicableHonorRate } from './honorService';
+import { logAudit } from '../utils/auditLog';
 
 export class SessionError extends Error {
   status: number;
@@ -248,20 +249,41 @@ export async function decideValidation(
     throw new SessionError('Validasi ini sudah diputuskan sebelumnya', 409);
   }
 
+  const sessionBefore = await prisma.teachingSession.findUnique({ where: { id: validation.sessionId } });
+
   await prisma.sessionValidation.update({
     where: { id: validationId },
     data: { decision, adminNotes, decidedBy: adminId, decidedAt: new Date() },
   });
 
-  if (decision === 'APPROVED') {
-    // Admin acting on behalf of the session — no ownership restriction.
-    return completeSession(validation.sessionId, adminId, null);
-  }
+  const result =
+    decision === 'APPROVED'
+      ? // Admin acting on behalf of the session — no ownership restriction.
+        await completeSession(validation.sessionId, adminId, null)
+      : await prisma.teachingSession.update({
+          where: { id: validation.sessionId },
+          data: { status: 'CANCELLED_NOT_COUNTED', updatedBy: adminId },
+        });
 
-  return prisma.teachingSession.update({
-    where: { id: validation.sessionId },
-    data: { status: 'CANCELLED_NOT_COUNTED', updatedBy: adminId },
+  // BR-13: this is exactly "koreksi data setelah sesi terkunci dilakukan admin" —
+  // record the traceable before/after.
+  await logAudit({
+    tableName: 'teaching_sessions',
+    recordId: validation.sessionId,
+    action: 'UPDATE',
+    oldValues: {
+      status: sessionBefore?.status ?? null,
+      honorRateSnapshot: sessionBefore?.honorRateSnapshot?.toString() ?? null,
+    },
+    newValues: {
+      status: result.status,
+      honorRateSnapshot: result.honorRateSnapshot?.toString() ?? null,
+    },
+    changedBy: adminId,
+    reason: `Validasi ${validation.caseType} diputuskan: ${decision}${adminNotes ? ` — ${adminNotes}` : ''}`,
   });
+
+  return result;
 }
 
 export async function listSessions(filters: {

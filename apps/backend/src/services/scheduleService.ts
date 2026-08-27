@@ -1,5 +1,6 @@
 import { prisma } from '../utils/prisma';
 import { AppError } from '../utils/errors';
+import { logAudit } from '../utils/auditLog';
 
 export async function createSchedule(data: {
   tutorId: string;
@@ -106,8 +107,25 @@ export async function updateSchedule(
   return prisma.schedule.update({ where: { id }, data });
 }
 
-export async function setScheduleStatus(id: string, status: 'ACTIVE' | 'INACTIVE' | 'CANCELLED') {
+export async function setScheduleStatus(
+  id: string,
+  status: 'ACTIVE' | 'INACTIVE' | 'CANCELLED',
+  adminId: string
+) {
   const schedule = await prisma.schedule.findUnique({ where: { id } });
   if (!schedule) throw new AppError('Jadwal tidak ditemukan', 404);
-  return prisma.schedule.update({ where: { id }, data: { status } });
+
+  const updated = await prisma.schedule.update({ where: { id }, data: { status } });
+
+  await logAudit({
+    tableName: 'schedules',
+    recordId: id,
+    action: 'UPDATE',
+    oldValues: { status: schedule.status },
+    newValues: { status: updated.status },
+    changedBy: adminId,
+    reason: `Ubah status jadwal menjadi ${status}`,
+  });
+
+  return updated;
 }

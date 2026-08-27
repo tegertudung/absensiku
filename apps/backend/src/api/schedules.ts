@@ -149,7 +149,10 @@ router.patch('/:id/status', requireAuth, requireRole('ADMIN'), async (req: Reque
     return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten().fieldErrors });
   }
   try {
-    res.json({ success: true, data: await setScheduleStatus(req.params.id, parsed.data.status) });
+    res.json({
+      success: true,
+      data: await setScheduleStatus(req.params.id, parsed.data.status, req.user!.userId),
+    });
   } catch (err) {
     handleError(err, res);
   }
