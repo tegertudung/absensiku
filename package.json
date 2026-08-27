@@ -1,0 +1,36 @@
+{
+  "name": "absensiku",
+  "version": "1.0.0",
+  "description": "Sistem Absensi Pioner Class - Comprehensive attendance management system",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm -r run dev",
+    "build": "pnpm -r run build",
+    "db:migrate": "cd apps/backend && npx prisma migrate dev",
+    "db:push": "cd apps/backend && npx prisma db push",
+    "db:seed": "cd apps/backend && npx prisma db seed",
+    "db:studio": "cd apps/backend && npx prisma studio",
+    "backend": "cd apps/backend && pnpm dev",
+    "frontend": "cd apps/frontend && pnpm dev",
+    "type-check": "pnpm -r run type-check",
+    "lint": "pnpm -r run lint || true",
+    "format": "pnpm -r run format || true"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "keywords": [
+    "attendance",
+    "management",
+    "education",
+    "pioner",
+    "class",
+    "monorepo"
+  ],
+  "author": "Pioner Class Development Team",
+  "license": "MIT"
+}

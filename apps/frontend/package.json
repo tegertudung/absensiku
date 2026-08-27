@@ -1,0 +1,37 @@
+{
+  "name": "@absensiku/frontend",
+  "version": "1.0.0",
+  "description": "Absensiku Frontend - Next.js + React + TypeScript",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint || true",
+    "type-check": "tsc --noEmit",
+    "format": "prettier --write 'src/**/*.{ts,tsx}' || true"
+  },
+  "dependencies": {
+    "next": "^14.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "zustand": "^4.4.5",
+    "react-query": "^3.39.3",
+    "axios": "^1.6.0",
+    "zod": "^3.22.4",
+    "react-hook-form": "^7.48.0",
+    "tailwindcss": "^3.3.6"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "@types/node": "^20.9.0",
+    "@types/react": "^18.2.37",
+    "@types/react-dom": "^18.2.15",
+    "@next/eslint-plugin-next": "^14.0.0",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.31",
+    "prettier": "^3.1.0",
+    "eslint": "^8.53.0",
+    "eslint-config-next": "^14.0.0"
+  }
+}

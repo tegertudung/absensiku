@@ -1,0 +1,354 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// 1. USERS & AUTHENTICATION
+// ============================================
+
+model User {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  passwordHash String
+  role      String    // 'ADMIN' | 'TENTOR'
+  isActive  Boolean   @default(true)
+  lastLogin DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  tutor Tutor?
+
+  @@index([email])
+  @@index([role])
+}
+
+// ============================================
+// 2. TUTORS
+// ============================================
+
+model Tutor {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  name         String
+  phone        String?
+  email        String?
+  hireDate     DateTime?
+  status       String   @default("ACTIVE") // 'ACTIVE' | 'INACTIVE' | 'ON_LEAVE'
+  bankAccount  String?
+  bankName     String?
+  bankHolderName String?
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  schedules Schedule[]
+  sessions TeachingSession[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ============================================
+// 3. STUDENTS
+// ============================================
+
+model Student {
+  id             String   @id @default(uuid())
+  name           String
+  phone          String?
+  email          String?
+  guardianName   String?
+  guardianPhone  String?
+  status         String   @default("ACTIVE") // 'ACTIVE' | 'INACTIVE' | 'GRADUATED'
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  packages PrivatePackage[]
+  sessions TeachingSession[]
+
+  @@index([status])
+}
+
+// ============================================
+// 4. SUBJECTS (Mata Pelajaran)
+// ============================================
+
+model Subject {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  description String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  classes Class[]
+  sessions TeachingSession[]
+
+  @@index([isActive])
+}
+
+// ============================================
+// 5. CLASSES (Kelas Reguler)
+// ============================================
+
+model Class {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  level       String?
+  subjectId   String?
+  maxStudents Int      @default(20)
+  status      String   @default("ACTIVE") // 'ACTIVE' | 'INACTIVE'
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  subject Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  schedules Schedule[]
+  sessions TeachingSession[]
+
+  @@index([subjectId])
+  @@index([status])
+}
+
+// ============================================
+// 6. CLASS ENROLLMENTS
+// ============================================
+
+model ClassEnrollment {
+  id             String   @id @default(uuid())
+  classId        String
+  studentId      String
+  enrollmentDate DateTime @default(now())
+  status         String   @default("ACTIVE") // 'ACTIVE' | 'INACTIVE' | 'GRADUATED'
+  createdAt      DateTime @default(now())
+
+  @@unique([classId, studentId])
+  @@index([classId])
+  @@index([studentId])
+}
+
+// ============================================
+// 7. SCHEDULES (Jadwal Mengajar)
+// ============================================
+
+model Schedule {
+  id          String   @id @default(uuid())
+  tutorId     String
+  sessionType String   // 'REGULAR' | 'PRIVATE'
+  classId     String?
+  studentId   String?
+  subjectId   String?
+  dayOfWeek   Int      // 0=Sunday, 6=Saturday
+  startTime   DateTime
+  endTime     DateTime
+  startDate   DateTime
+  endDate     DateTime?
+  status      String   @default("ACTIVE") // 'ACTIVE' | 'INACTIVE' | 'CANCELLED'
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tutor Tutor @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  class Class? @relation(fields: [classId], references: [id], onDelete: SetNull)
+  sessions TeachingSession[]
+
+  @@index([tutorId])
+  @@index([classId])
+  @@index([studentId])
+  @@index([status])
+}
+
+// ============================================
+// 8. TEACHING SESSIONS (CRITICAL TABLE)
+// ============================================
+
+model TeachingSession {
+  id                   String   @id @default(uuid())
+  scheduleId           String
+  tutorId              String
+  sessionType          String   // 'REGULAR' | 'PRIVATE'
+  sessionDate          DateTime
+  startTime            DateTime?
+  endTime              DateTime?
+  classId              String?
+  studentId            String?
+  subjectId            String?
+  status               String   @default("SCHEDULED")
+  honorRateSnapshot    Decimal? // IMMUTABLE - Snapshot at completion time
+  notes                String?
+  completedAt          DateTime?
+  createdBy            String?
+  createdAt            DateTime @default(now())
+  updatedBy            String?
+  updatedAt            DateTime @updatedAt
+
+  schedule Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  tutor Tutor @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  class Class? @relation(fields: [classId], references: [id], onDelete: SetNull)
+  student Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  subject Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  attendanceRecords AttendanceRecord[]
+  packageUsages PrivatePackageUsage[]
+  validations SessionValidation[]
+
+  @@index([tutorId])
+  @@index([sessionDate])
+  @@index([status])
+  @@index([classId])
+  @@index([studentId])
+}
+
+// ============================================
+// 9. ATTENDANCE RECORDS (For Regular Classes)
+// ============================================
+
+model AttendanceRecord {
+  id              String   @id @default(uuid())
+  sessionId       String
+  studentId       String
+  status          String   // 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED'
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  session TeachingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, studentId])
+  @@index([sessionId])
+  @@index([studentId])
+}
+
+// ============================================
+// 10. PRIVATE PACKAGES (Paket Privat)
+// ============================================
+
+model PrivatePackage {
+  id             String   @id @default(uuid())
+  studentId      String
+  quotaTotal     Int      @default(24)
+  quotaUsed      Int      @default(0)
+  quotaRemaining Int      @default(24) // Calculated: quotaTotal - quotaUsed
+  activationDate DateTime @default(now())
+  expiryDate     DateTime?
+  status         String   @default("ACTIVE") // 'ACTIVE' | 'EXPIRED' | 'CANCELLED'
+  packageName    String?
+  price          Decimal?
+  paymentDate    DateTime?
+  paymentMethod  String?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  usages PrivatePackageUsage[]
+
+  @@index([studentId])
+  @@index([status])
+}
+
+// ============================================
+// 11. PRIVATE PACKAGE USAGES (Transaksi Kuota)
+// ============================================
+
+model PrivatePackageUsage {
+  id               String   @id @default(uuid())
+  packageId        String
+  sessionId        String
+  quantityUsed     Int      @default(1)
+  changeType       String   // 'SESSION_COMPLETED' | 'ADMIN_ADJUSTMENT' | 'CANCELLATION_REFUND'
+  changedBy        String?
+  changedAt        DateTime @default(now())
+  reason           String?
+
+  package PrivatePackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  session TeachingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([packageId])
+  @@index([sessionId])
+}
+
+// ============================================
+// 12. HONOR RATES (Master Tarif)
+// ============================================
+
+model HonorRate {
+  id            String   @id @default(uuid())
+  sessionType   String   // 'REGULAR' | 'PRIVATE'
+  subjectId     String?
+  nominal       Decimal
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  status        String   @default("ACTIVE") // 'ACTIVE' | 'INACTIVE'
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([sessionType])
+  @@index([effectiveFrom])
+  @@index([status])
+}
+
+// ============================================
+// 13. HONOR RATE HISTORY
+// ============================================
+
+model HonorRateHistory {
+  id          String   @id @default(uuid())
+  rateId      String
+  oldNominal  Decimal?
+  newNominal  Decimal
+  changedBy   String?
+  changedAt   DateTime @default(now())
+  reason      String?
+
+  @@index([rateId])
+}
+
+// ============================================
+// 14. SESSION VALIDATIONS
+// ============================================
+
+model SessionValidation {
+  id              String   @id @default(uuid())
+  sessionId       String   @unique
+  caseType        String   // 'CANCELLATION_DAY_OF' | 'OVERDUE_COMPLETION' | 'MANUAL_CORRECTION' | 'DISPUTE'
+  decision        String   @default("PENDING") // 'APPROVED' | 'REJECTED' | 'PENDING' | 'NEED_MORE_INFO'
+  description     String
+  adminNotes      String?
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  decidedBy       String?
+  decidedAt       DateTime?
+
+  session TeachingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([decision])
+}
+
+// ============================================
+// 15. AUDIT LOGS (Jejak Perubahan)
+// ============================================
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  tableName  String
+  recordId   String
+  action     String   // 'INSERT' | 'UPDATE' | 'DELETE'
+  oldValues  Json?
+  newValues  Json?
+  changedBy  String?
+  changedAt  DateTime @default(now())
+  reason     String?
+
+  @@index([tableName])
+  @@index([recordId])
+  @@index([changedAt])
+}
