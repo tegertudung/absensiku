@@ -1,6 +1,31 @@
 import { prisma } from '../utils/prisma';
 import { AppError } from '../utils/errors';
 import { logAudit } from '../utils/auditLog';
+import { createNotification } from './notificationService';
+
+const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', "Jum'at", 'Sabtu'];
+
+function formatScheduleTime(d: Date) {
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+async function notifyTutorOfSchedule(
+  tutorId: string,
+  title: string,
+  dayOfWeek: number,
+  startTime: Date,
+  endTime: Date
+) {
+  const tutor = await prisma.tutor.findUnique({ where: { id: tutorId } });
+  if (!tutor) return;
+
+  await createNotification({
+    userId: tutor.userId,
+    title,
+    message: `${DAY_NAMES[dayOfWeek]}, ${formatScheduleTime(startTime)}–${formatScheduleTime(endTime)}`,
+    type: 'SCHEDULE_CHANGE',
+  });
+}
 
 export async function createSchedule(data: {
   tutorId: string;
@@ -29,7 +54,7 @@ export async function createSchedule(data: {
     throw new AppError('Jam mulai harus sebelum jam selesai', 400);
   }
 
-  return prisma.schedule.create({
+  const schedule = await prisma.schedule.create({
     data: {
       tutorId: data.tutorId,
       sessionType: data.sessionType,
@@ -45,6 +70,16 @@ export async function createSchedule(data: {
       notes: data.notes,
     },
   });
+
+  await notifyTutorOfSchedule(
+    data.tutorId,
+    'Jadwal baru ditambahkan',
+    data.dayOfWeek,
+    data.startTime,
+    data.endTime
+  );
+
+  return schedule;
 }
 
 export async function listSchedules(filters: {
@@ -104,7 +139,19 @@ export async function updateSchedule(
     throw new AppError('Jam mulai harus sebelum jam selesai', 400);
   }
 
-  return prisma.schedule.update({ where: { id }, data });
+  const updated = await prisma.schedule.update({ where: { id }, data });
+
+  if (data.dayOfWeek !== undefined || data.startTime || data.endTime) {
+    await notifyTutorOfSchedule(
+      updated.tutorId,
+      'Jadwal Anda diubah',
+      updated.dayOfWeek,
+      updated.startTime,
+      updated.endTime
+    );
+  }
+
+  return updated;
 }
 
 export async function setScheduleStatus(

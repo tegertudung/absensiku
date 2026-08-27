@@ -365,3 +365,21 @@ model AuditLog {
   @@index([recordId])
   @@index([changedAt])
 }
+
+// ============================================
+// 16. NOTIFICATIONS (section J: "Notifikasi Tentor ketika ada
+// perubahan jadwal atau kelas bentrok")
+// ============================================
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  message   String
+  type      String   @default("SCHEDULE_CHANGE") // 'SCHEDULE_CHANGE' | 'GENERAL'
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([isRead])
+}

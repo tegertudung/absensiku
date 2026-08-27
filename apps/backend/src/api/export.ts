@@ -9,7 +9,7 @@ const router = Router();
 // Admin: can export all tutors or filter to one via ?tutorId=.
 // Tentor: BR-12 — always scoped to their own data, ?tutorId= is ignored.
 router.get('/recap.xlsx', requireAuth, async (req: Request, res: Response) => {
-  const { startDate, endDate, tutorId, sessionType, status } = req.query;
+  const { startDate, endDate, tutorId, sessionType, status, classId, dayOfWeek, hour } = req.query;
 
   let scopedTutorId: string | undefined;
 
@@ -32,6 +32,9 @@ router.get('/recap.xlsx', requireAuth, async (req: Request, res: Response) => {
       sessionType: typeof sessionType === 'string' ? sessionType : undefined,
       startDate: typeof startDate === 'string' ? new Date(startDate) : undefined,
       endDate: typeof endDate === 'string' ? new Date(endDate) : undefined,
+      classId: typeof classId === 'string' ? classId : undefined,
+      dayOfWeek: typeof dayOfWeek === 'string' ? Number(dayOfWeek) : undefined,
+      hour: typeof hour === 'string' ? hour : undefined,
     });
 
     const filename = `rekap-mengajar-${new Date().toISOString().split('T')[0]}.xlsx`;

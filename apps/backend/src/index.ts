@@ -18,6 +18,7 @@ import dashboardRouter from './api/dashboard';
 import privatePackagesRouter from './api/privatePackages';
 import { startOverdueSessionLockJob } from './jobs/lockOverdueSessions';
 import auditLogsRouter from './api/auditLogs';
+import notificationsRouter from './api/notifications';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -51,6 +52,7 @@ app.use('/api/schedules', schedulesRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/private-packages', privatePackagesRouter);
 app.use('/api/audit-logs', auditLogsRouter);
+app.use('/api/notifications', notificationsRouter);
 
 // 404 handler
 app.use((req, res) => {

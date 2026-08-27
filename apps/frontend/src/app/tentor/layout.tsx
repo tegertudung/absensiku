@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import RequireAuth from '@/components/RequireAuth';
+import NotificationBell from '@/components/NotificationBell';
 import { useAuthStore } from '@/store/authStore';
 
 const NAV_ITEMS = [
@@ -21,15 +22,18 @@ export default function TentorLayout({ children }: { children: React.ReactNode }
       <div className="min-h-screen bg-gray-50 flex flex-col">
         <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between sticky top-0 z-10">
           <p className="font-semibold text-gray-900">Absensiku</p>
-          <button
-            onClick={() => {
-              logout();
-              router.push('/login');
-            }}
-            className="text-xs text-red-600"
-          >
-            Keluar
-          </button>
+          <div className="flex items-center gap-3">
+            <NotificationBell />
+            <button
+              onClick={() => {
+                logout();
+                router.push('/login');
+              }}
+              className="text-xs text-red-600"
+            >
+              Keluar
+            </button>
+          </div>
         </header>
 
         <main className="flex-1 px-4 py-4 pb-20">{children}</main>

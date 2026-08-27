@@ -286,30 +286,56 @@ export async function decideValidation(
   return result;
 }
 
+/**
+ * BR-11/AC-07: "difilter berdasarkan jam, hari, kelas, bulan, dan tentor."
+ * "Bulan" is just a date range (startDate/endDate). "Hari" (day of week) and
+ * "jam" (time of day) aren't stored on the session itself — they live on its
+ * originating Schedule — so dayOfWeek filters via the schedule relation
+ * (native Prisma support) and hour is matched in-memory against the
+ * schedule's startTime, since Prisma has no portable "extract hour from
+ * DateTime" filter without raw SQL. Fine at this scale (single-office
+ * volume); revisit with a raw query if session counts grow large.
+ */
 export async function listSessions(filters: {
   tutorId?: string;
   status?: string;
   sessionType?: string;
   startDate?: Date;
   endDate?: Date;
+  classId?: string;
+  dayOfWeek?: number;
+  hour?: string; // "HH:mm"
 }) {
-  return prisma.teachingSession.findMany({
+  const sessions = await prisma.teachingSession.findMany({
     where: {
       tutorId: filters.tutorId,
       status: filters.status as any,
       sessionType: filters.sessionType as any,
+      classId: filters.classId,
       sessionDate:
         filters.startDate || filters.endDate
           ? { gte: filters.startDate, lte: filters.endDate }
           : undefined,
+      schedule: filters.dayOfWeek !== undefined ? { dayOfWeek: filters.dayOfWeek } : undefined,
     },
     include: {
       tutor: { select: { name: true } },
       class: { select: { name: true } },
       student: { select: { name: true } },
       subject: { select: { name: true } },
+      schedule: { select: { startTime: true } },
     },
     orderBy: { sessionDate: 'desc' },
+  });
+
+  if (!filters.hour) return sessions;
+
+  return sessions.filter((s) => {
+    if (!s.schedule?.startTime) return false;
+    const d = new Date(s.schedule.startTime);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    return `${hh}:${mm}` === filters.hour;
   });
 }
 

@@ -21,9 +21,12 @@ interface Option {
   name: string;
 }
 
+const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', "Jum'at", 'Sabtu'];
+
 export default function AdminRecapPage() {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [tutors, setTutors] = useState<Option[]>([]);
+  const [classes, setClasses] = useState<Option[]>([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
 
@@ -33,6 +36,9 @@ export default function AdminRecapPage() {
     tutorId: '',
     sessionType: '',
     status: '',
+    classId: '',
+    dayOfWeek: '',
+    hour: '',
   });
 
   function buildParams() {
@@ -42,6 +48,9 @@ export default function AdminRecapPage() {
     if (filters.tutorId) params.tutorId = filters.tutorId;
     if (filters.sessionType) params.sessionType = filters.sessionType;
     if (filters.status) params.status = filters.status;
+    if (filters.classId) params.classId = filters.classId;
+    if (filters.dayOfWeek) params.dayOfWeek = filters.dayOfWeek;
+    if (filters.hour) params.hour = filters.hour;
     return params;
   }
 
@@ -58,6 +67,7 @@ export default function AdminRecapPage() {
 
   useEffect(() => {
     api.get('/tutors').then((res) => setTutors(res.data.data.map((t: any) => ({ id: t.id, name: t.name }))));
+    api.get('/classes').then((res) => setClasses(res.data.data.map((c: any) => ({ id: c.id, name: c.name }))));
   }, []);
 
   useEffect(() => {
@@ -99,7 +109,7 @@ export default function AdminRecapPage() {
         </button>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4 grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="bg-white rounded-lg border border-gray-200 p-4 mb-4 grid grid-cols-2 md:grid-cols-4 gap-3">
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">Dari Tanggal</label>
           <input
@@ -159,6 +169,45 @@ export default function AdminRecapPage() {
               </option>
             ))}
           </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Kelas</label>
+          <select
+            value={filters.classId}
+            onChange={(e) => setFilters({ ...filters, classId: e.target.value })}
+            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+          >
+            <option value="">Semua Kelas</option>
+            {classes.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Hari</label>
+          <select
+            value={filters.dayOfWeek}
+            onChange={(e) => setFilters({ ...filters, dayOfWeek: e.target.value })}
+            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+          >
+            <option value="">Semua Hari</option>
+            {DAY_NAMES.map((d, i) => (
+              <option key={i} value={i}>
+                {d}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Jam</label>
+          <input
+            type="time"
+            value={filters.hour}
+            onChange={(e) => setFilters({ ...filters, hour: e.target.value })}
+            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+          />
         </div>
       </div>
 

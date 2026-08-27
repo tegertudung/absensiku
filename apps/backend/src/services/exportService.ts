@@ -35,6 +35,9 @@ export async function generateRecapExcel(filters: {
   sessionType?: string;
   startDate?: Date;
   endDate?: Date;
+  classId?: string;
+  dayOfWeek?: number;
+  hour?: string;
 }) {
   const sessions = await listSessions(filters);
 
