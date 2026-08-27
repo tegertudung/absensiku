@@ -7,6 +7,11 @@ import express from 'express';
 import cors from 'cors';
 import authRouter from './api/auth';
 import sessionsRouter from './api/sessions';
+import tutorsRouter from './api/tutors';
+import studentsRouter from './api/students';
+import subjectsRouter from './api/subjects';
+import classesRouter from './api/classes';
+import honorRatesRouter from './api/honorRates';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -30,6 +35,11 @@ app.get('/api/health', (req, res) => {
 // API routes
 app.use('/api/auth', authRouter);
 app.use('/api/sessions', sessionsRouter);
+app.use('/api/tutors', tutorsRouter);
+app.use('/api/students', studentsRouter);
+app.use('/api/subjects', subjectsRouter);
+app.use('/api/classes', classesRouter);
+app.use('/api/honor-rates', honorRatesRouter);
 
 // 404 handler
 app.use((req, res) => {

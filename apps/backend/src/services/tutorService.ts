@@ -1,0 +1,97 @@
+import bcrypt from 'bcryptjs';
+import { prisma } from '../utils/prisma';
+import { AppError } from '../utils/errors';
+
+const SALT_ROUNDS = 10;
+
+/**
+ * Admin creates a tutor account: this is both a User (login credentials,
+ * role=TENTOR) and a Tutor profile, created atomically.
+ */
+export async function createTutor(data: {
+  email: string;
+  password: string;
+  name: string;
+  phone?: string;
+  hireDate?: Date;
+  bankAccount?: string;
+  bankName?: string;
+  bankHolderName?: string;
+}) {
+  const existing = await prisma.user.findUnique({ where: { email: data.email } });
+  if (existing) throw new AppError('Email sudah terdaftar', 409);
+
+  const passwordHash = await bcrypt.hash(data.password, SALT_ROUNDS);
+
+  return prisma.$transaction(async (tx) => {
+    const user = await tx.user.create({
+      data: { email: data.email, passwordHash, role: 'TENTOR', isActive: true },
+    });
+
+    const tutor = await tx.tutor.create({
+      data: {
+        userId: user.id,
+        name: data.name,
+        email: data.email,
+        phone: data.phone,
+        hireDate: data.hireDate,
+        bankAccount: data.bankAccount,
+        bankName: data.bankName,
+        bankHolderName: data.bankHolderName,
+        status: 'ACTIVE',
+      },
+    });
+
+    return tutor;
+  });
+}
+
+export async function listTutors() {
+  return prisma.tutor.findMany({
+    include: { user: { select: { email: true, isActive: true, lastLogin: true } } },
+    orderBy: { name: 'asc' },
+  });
+}
+
+export async function getTutorById(id: string) {
+  const tutor = await prisma.tutor.findUnique({
+    where: { id },
+    include: { user: { select: { email: true, isActive: true, lastLogin: true } } },
+  });
+  if (!tutor) throw new AppError('Tentor tidak ditemukan', 404);
+  return tutor;
+}
+
+export async function updateTutor(
+  id: string,
+  data: Partial<{
+    name: string;
+    phone: string;
+    hireDate: Date;
+    bankAccount: string;
+    bankName: string;
+    bankHolderName: string;
+    notes: string;
+  }>
+) {
+  const tutor = await prisma.tutor.findUnique({ where: { id } });
+  if (!tutor) throw new AppError('Tentor tidak ditemukan', 404);
+  return prisma.tutor.update({ where: { id }, data });
+}
+
+/**
+ * Deactivating a tutor also disables their login (isActive on the linked User),
+ * consistent with the module description "Tambah, ubah, nonaktifkan" (BR access control).
+ */
+export async function setTutorActive(id: string, isActive: boolean) {
+  const tutor = await prisma.tutor.findUnique({ where: { id } });
+  if (!tutor) throw new AppError('Tentor tidak ditemukan', 404);
+
+  return prisma.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: tutor.userId }, data: { isActive } });
+    return tx.tutor.update({
+      where: { id },
+      data: { status: isActive ? 'ACTIVE' : 'INACTIVE' },
+    });
+  });
+}

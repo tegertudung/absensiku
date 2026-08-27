@@ -1,0 +1,91 @@
+import { Router, Request, Response } from 'express';
+import { z } from 'zod';
+import { requireAuth, requireRole } from '../middleware/auth';
+import { handleError } from '../utils/errors';
+import {
+  createStudent,
+  listStudents,
+  getStudentById,
+  updateStudent,
+  setStudentStatus,
+} from '../services/studentService';
+
+const router = Router();
+
+const createSchema = z.object({
+  name: z.string().min(2, 'Nama minimal 2 karakter'),
+  phone: z.string().optional(),
+  email: z.string().email('Email tidak valid').optional(),
+  guardianName: z.string().optional(),
+  guardianPhone: z.string().optional(),
+});
+
+// POST /api/students
+router.post('/', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
+  const parsed = createSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten().fieldErrors });
+  }
+  try {
+    const student = await createStudent(parsed.data);
+    res.status(201).json({ success: true, data: student });
+  } catch (err) {
+    handleError(err, res);
+  }
+});
+
+// GET /api/students
+router.get('/', requireAuth, requireRole('ADMIN'), async (_req: Request, res: Response) => {
+  try {
+    res.json({ success: true, data: await listStudents() });
+  } catch (err) {
+    handleError(err, res);
+  }
+});
+
+// GET /api/students/:id — includes private package history
+router.get('/:id', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
+  try {
+    res.json({ success: true, data: await getStudentById(req.params.id) });
+  } catch (err) {
+    handleError(err, res);
+  }
+});
+
+const updateSchema = z.object({
+  name: z.string().min(2).optional(),
+  phone: z.string().optional(),
+  email: z.string().email().optional(),
+  guardianName: z.string().optional(),
+  guardianPhone: z.string().optional(),
+});
+
+// PUT /api/students/:id
+router.put('/:id', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
+  const parsed = updateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten().fieldErrors });
+  }
+  try {
+    res.json({ success: true, data: await updateStudent(req.params.id, parsed.data) });
+  } catch (err) {
+    handleError(err, res);
+  }
+});
+
+const statusSchema = z.object({ status: z.enum(['ACTIVE', 'INACTIVE', 'GRADUATED']) });
+
+// PATCH /api/students/:id/status
+router.patch('/:id/status', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
+  const parsed = statusSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten().fieldErrors });
+  }
+  try {
+    res.json({ success: true, data: await setStudentStatus(req.params.id, parsed.data.status) });
+  } catch (err) {
+    handleError(err, res);
+  }
+});
+
+export default router;
