@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireAuth, requireRole } from '../middleware/auth';
 import { handleError, AppError } from '../utils/errors';
 import { prisma } from '../utils/prisma';
+import { enrollStudent, listClassEnrollments, setEnrollmentStatus } from '../services/enrollmentService';
 
 const router = Router();
 
@@ -55,5 +56,64 @@ router.patch('/:id/deactivate', requireAuth, requireRole('ADMIN'), async (req: R
     handleError(err, res);
   }
 });
+
+// ============================================
+// Class Enrollments — which students belong to a class (needed for attendance roster)
+// ============================================
+
+const enrollSchema = z.object({ studentId: z.string().uuid('studentId harus UUID valid') });
+
+// POST /api/classes/:classId/enrollments
+router.post(
+  '/:classId/enrollments',
+  requireAuth,
+  requireRole('ADMIN'),
+  async (req: Request, res: Response) => {
+    const parsed = enrollSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten().fieldErrors });
+    }
+    try {
+      const enrollment = await enrollStudent(req.params.classId, parsed.data.studentId);
+      res.status(201).json({ success: true, data: enrollment });
+    } catch (err) {
+      handleError(err, res);
+    }
+  }
+);
+
+// GET /api/classes/:classId/enrollments — class roster (any authenticated role)
+router.get('/:classId/enrollments', requireAuth, async (req: Request, res: Response) => {
+  try {
+    res.json({ success: true, data: await listClassEnrollments(req.params.classId) });
+  } catch (err) {
+    handleError(err, res);
+  }
+});
+
+const enrollmentStatusSchema = z.object({ status: z.enum(['ACTIVE', 'INACTIVE', 'GRADUATED']) });
+
+// PATCH /api/classes/:classId/enrollments/:studentId/status
+router.patch(
+  '/:classId/enrollments/:studentId/status',
+  requireAuth,
+  requireRole('ADMIN'),
+  async (req: Request, res: Response) => {
+    const parsed = enrollmentStatusSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten().fieldErrors });
+    }
+    try {
+      const enrollment = await setEnrollmentStatus(
+        req.params.classId,
+        req.params.studentId,
+        parsed.data.status
+      );
+      res.json({ success: true, data: enrollment });
+    } catch (err) {
+      handleError(err, res);
+    }
+  }
+);
 
 export default router;

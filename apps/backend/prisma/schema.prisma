@@ -75,6 +75,7 @@ model Student {
   packages PrivatePackage[]
   sessions TeachingSession[]
   schedules Schedule[]
+  enrollments ClassEnrollment[]
 
   @@index([status])
 }
@@ -114,6 +115,7 @@ model Class {
   subject Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
   schedules Schedule[]
   sessions TeachingSession[]
+  enrollments ClassEnrollment[]
 
   @@index([subjectId])
   @@index([status])
@@ -130,6 +132,9 @@ model ClassEnrollment {
   enrollmentDate DateTime @default(now())
   status         String   @default("ACTIVE") // 'ACTIVE' | 'INACTIVE' | 'GRADUATED'
   createdAt      DateTime @default(now())
+
+  class   Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@unique([classId, studentId])
   @@index([classId])
