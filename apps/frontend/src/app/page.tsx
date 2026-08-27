@@ -1,22 +1,28 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuthStore } from '@/store/authStore';
 
 export default function HomePage() {
-  const [status, setStatus] = useState<string>('Checking...');
+  const router = useRouter();
+  const user = useAuthStore((s) => s.user);
+  const isHydrated = useAuthStore((s) => s.isHydrated);
 
   useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/health`)
-      .then((res) => res.json())
-      .then((data) => setStatus(`✓ Backend connected: ${data.status}`))
-      .catch(() => setStatus('✗ Backend not reachable'));
-  }, []);
+    if (!isHydrated) return;
+    if (!user) {
+      router.replace('/login');
+    } else if (user.role === 'ADMIN') {
+      router.replace('/admin/dashboard');
+    } else {
+      router.replace('/tentor');
+    }
+  }, [isHydrated, user, router]);
 
   return (
-    <main style={{ padding: '2rem', fontFamily: 'sans-serif' }}>
-      <h1>🚀 Absensiku</h1>
-      <p>Sistem Absensi Pioner Class</p>
-      <p>Backend status: {status}</p>
+    <main className="min-h-screen flex items-center justify-center">
+      <p className="text-sm text-gray-400">Memuat...</p>
     </main>
   );
 }

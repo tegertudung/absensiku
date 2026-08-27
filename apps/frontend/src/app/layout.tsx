@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import AuthHydrator from '@/components/AuthHydrator';
 
 export const metadata: Metadata = {
   title: 'Absensiku - Sistem Absensi Pioner Class',
@@ -13,7 +14,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="id">
-      <body>{children}</body>
+      <body>
+        <AuthHydrator />
+        {children}
+      </body>
     </html>
   );
 }
