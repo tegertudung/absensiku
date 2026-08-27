@@ -145,7 +145,7 @@ export default function AdminSchedulesPage() {
         <h1 className="text-xl font-semibold text-gray-900">Jadwal</h1>
         <button
           onClick={() => setShowForm(true)}
-          className="rounded-md bg-blue-600 text-white text-sm font-medium px-4 py-2 hover:bg-blue-700"
+          className="rounded-md bg-navy-900 text-white text-sm font-medium px-4 py-2 hover:bg-navy-800"
         >
           + Tambah Jadwal
         </button>
@@ -354,7 +354,7 @@ export default function AdminSchedulesPage() {
             <button
               type="submit"
               disabled={saving}
-              className="w-full rounded-md bg-blue-600 text-white text-sm font-medium py-2 hover:bg-blue-700 disabled:opacity-60"
+              className="w-full rounded-md bg-navy-900 text-white text-sm font-medium py-2 hover:bg-navy-800 disabled:opacity-60"
             >
               {saving ? 'Menyimpan...' : 'Simpan'}
             </button>

@@ -35,8 +35,9 @@ router.post('/', requireAuth, requireRole('ADMIN'), async (req: Request, res: Re
   }
 });
 
-// GET /api/students
-router.get('/', requireAuth, requireRole('ADMIN'), async (_req: Request, res: Response) => {
+// GET /api/students — also readable by TENTOR (needed for the "Tambah Privat"
+// student search when a tentor creates their own private schedule).
+router.get('/', requireAuth, async (_req: Request, res: Response) => {
   try {
     res.json({ success: true, data: await listStudents() });
   } catch (err) {

@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import api from '@/lib/api';
-import { formatRupiah, formatDate, SESSION_STATUS_LABELS, SESSION_TYPE_LABELS } from '@/lib/format';
+import { formatRupiah, formatDate, SESSION_STATUS_LABELS } from '@/lib/format';
+import { StatusBadge, TypeBadge } from '@/components/StatusBadge';
 
 interface SessionRow {
   id: string;
@@ -112,7 +113,7 @@ export default function AdminRecapPage() {
         <button
           onClick={handleExport}
           disabled={exporting}
-          className="rounded-md bg-green-600 text-white text-sm font-medium px-4 py-2 hover:bg-green-700 disabled:opacity-60"
+          className="rounded-md bg-navy-900 text-white text-sm font-medium px-4 py-2 hover:bg-navy-800 disabled:opacity-60"
         >
           {exporting ? 'Mengekspor...' : '⬇ Export Excel'}
         </button>
@@ -265,15 +266,13 @@ export default function AdminRecapPage() {
                   <td className="px-4 py-3 text-gray-600">{formatDate(s.sessionDate)}</td>
                   <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{formatHariJam(s)}</td>
                   <td className="px-4 py-3 text-gray-900">{s.tutor.name}</td>
-                  <td className="px-4 py-3 text-gray-600">{SESSION_TYPE_LABELS[s.sessionType]}</td>
+                  <td className="px-4 py-3"><TypeBadge type={s.sessionType} /></td>
                   <td className="px-4 py-3 text-gray-600">
                     {s.sessionType === 'REGULAR' ? s.class?.name : s.student?.name}
                   </td>
                   <td className="px-4 py-3 text-gray-600">{s.subject?.name || '-'}</td>
                   <td className="px-4 py-3">
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
-                      {SESSION_STATUS_LABELS[s.status] ?? s.status}
-                    </span>
+                    <StatusBadge status={s.status} />
                   </td>
                   <td className="px-4 py-3 text-gray-600">
                     {s.status === 'COMPLETED' ? formatRupiah(s.honorRateSnapshot) : '-'}

@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import api from '@/lib/api';
-import { formatRupiah, formatDate, SESSION_STATUS_LABELS, SESSION_TYPE_LABELS } from '@/lib/format';
+import { formatRupiah, formatDate } from '@/lib/format';
+import { StatusBadge, TypeBadge } from '@/components/StatusBadge';
 
 interface StudentDetail {
   id: string;
@@ -163,12 +164,10 @@ export default function AdminStudentDetailPage() {
                 <tr key={s.id} className="border-b border-gray-100 last:border-0">
                   <td className="px-4 py-3 text-gray-600">{formatDate(s.sessionDate)}</td>
                   <td className="px-4 py-3 text-gray-900">{s.tutor.name}</td>
-                  <td className="px-4 py-3 text-gray-600">{SESSION_TYPE_LABELS[s.sessionType]}</td>
+                  <td className="px-4 py-3"><TypeBadge type={s.sessionType} /></td>
                   <td className="px-4 py-3 text-gray-600">{s.subject?.name || '-'}</td>
                   <td className="px-4 py-3">
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
-                      {SESSION_STATUS_LABELS[s.status] ?? s.status}
-                    </span>
+                    <StatusBadge status={s.status} />
                   </td>
                   <td className="px-4 py-3 text-gray-900 font-medium">
                     {s.status === 'COMPLETED' ? formatRupiah(s.honorRateSnapshot) : '-'}

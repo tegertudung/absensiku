@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import api from '@/lib/api';
+import { getPushSubscriptionState, subscribeToPush } from '@/lib/push';
 
 interface NotificationItem {
   id: string;
@@ -14,6 +15,8 @@ interface NotificationItem {
 export default function NotificationBell() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [open, setOpen] = useState(false);
+  const [pushState, setPushState] = useState<'unsupported' | 'denied' | 'subscribed' | 'unsubscribed'>('unsupported');
+  const [enabling, setEnabling] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -29,6 +32,20 @@ export default function NotificationBell() {
     const interval = setInterval(load, 60000);
     return () => clearInterval(interval);
   }, [load]);
+
+  useEffect(() => {
+    getPushSubscriptionState().then(setPushState).catch(() => {});
+  }, [open]);
+
+  async function handleEnablePush() {
+    setEnabling(true);
+    try {
+      const result = await subscribeToPush();
+      setPushState(result === 'subscribed' ? 'subscribed' : result === 'denied' ? 'denied' : 'unsupported');
+    } finally {
+      setEnabling(false);
+    }
+  }
 
   async function markRead(id: string) {
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
@@ -62,6 +79,26 @@ export default function NotificationBell() {
             <div className="px-3 py-2 border-b border-gray-100">
               <p className="text-xs font-medium text-gray-900">Notifikasi</p>
             </div>
+            {pushState === 'unsubscribed' && (
+              <div className="px-3 py-2 border-b border-gray-100 bg-navy-50 flex items-center justify-between gap-2">
+                <p className="text-[11px] text-navy-800">Aktifkan notifikasi langsung ke HP/desktop?</p>
+                <button
+                  onClick={handleEnablePush}
+                  disabled={enabling}
+                  className="text-[11px] font-medium text-white bg-navy-900 rounded-md px-2 py-1 shrink-0 disabled:opacity-60"
+                >
+                  {enabling ? '...' : 'Aktifkan'}
+                </button>
+              </div>
+            )}
+            {pushState === 'denied' && (
+              <div className="px-3 py-2 border-b border-gray-100 bg-amber-50">
+                <p className="text-[11px] text-amber-700">
+                  Notifikasi diblokir di browser ini. Aktifkan lewat pengaturan izin situs untuk menerima notifikasi
+                  langsung ke perangkat.
+                </p>
+              </div>
+            )}
             {notifications.length === 0 ? (
               <p className="px-3 py-4 text-xs text-gray-400">Tidak ada notifikasi.</p>
             ) : (

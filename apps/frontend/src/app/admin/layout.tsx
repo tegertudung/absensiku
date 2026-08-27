@@ -6,17 +6,31 @@ import { usePathname, useRouter } from 'next/navigation';
 import RequireAuth from '@/components/RequireAuth';
 import { useAuthStore } from '@/store/authStore';
 import api from '@/lib/api';
+import {
+  IconDashboard,
+  IconStudent,
+  IconTutor,
+  IconClasses,
+  IconPrivate,
+  IconSchedule,
+  IconReport,
+  IconSettings,
+  IconBell,
+  IconMenu,
+  IconX,
+  IconLogout,
+} from '@/components/icons';
 
 const NAV_ITEMS = [
-  { href: '/admin/dashboard', label: 'Dashboard' },
-  { href: '/admin/tutors', label: 'Tentor' },
-  { href: '/admin/students', label: 'Siswa' },
-  { href: '/admin/classes', label: 'Kelas & Mapel' },
-  { href: '/admin/schedules', label: 'Jadwal' },
-  { href: '/admin/validations', label: 'Validasi' },
-  { href: '/admin/recap', label: 'Rekap & Honor' },
-  { href: '/admin/honor-rates', label: 'Master Honor' },
-  { href: '/admin/audit-log', label: 'Audit Log' },
+  { href: '/admin/dashboard', label: 'Dashboard', icon: IconDashboard, section: null },
+  { href: '/admin/tutors', label: 'Tentor', icon: IconTutor, section: 'AKADEMIK' },
+  { href: '/admin/students', label: 'Siswa', icon: IconStudent, section: 'AKADEMIK' },
+  { href: '/admin/classes', label: 'Kelas & Mapel', icon: IconClasses, section: 'AKADEMIK' },
+  { href: '/admin/schedules', label: 'Jadwal', icon: IconSchedule, section: 'AKADEMIK' },
+  { href: '/admin/validations', label: 'Validasi', icon: IconPrivate, section: 'AKADEMIK' },
+  { href: '/admin/recap', label: 'Rekap & Honor', icon: IconReport, section: 'LAPORAN' },
+  { href: '/admin/honor-rates', label: 'Master Honor', icon: IconReport, section: 'LAPORAN' },
+  { href: '/admin/audit-log', label: 'Audit Log', icon: IconSettings, section: 'LAPORAN' },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -39,39 +53,65 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     setMobileNavOpen(false);
   }, [pathname]);
 
+  let lastSection: string | null = null;
+
   const navList = (
     <nav className="flex-1 py-2 overflow-y-auto">
-      {NAV_ITEMS.map((item) => (
-        <Link
-          key={item.href}
-          href={item.href}
-          className={`flex items-center justify-between px-4 py-2 text-sm ${
-            pathname === item.href ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-600 hover:bg-gray-50'
-          }`}
-        >
-          <span>{item.label}</span>
-          {item.href === '/admin/validations' && pendingCount > 0 && (
-            <span className="text-xs bg-red-500 text-white rounded-full px-1.5 py-0.5 leading-none">
-              {pendingCount}
-            </span>
-          )}
-        </Link>
-      ))}
+      {NAV_ITEMS.map((item) => {
+        const showSection = item.section && item.section !== lastSection;
+        lastSection = item.section;
+        const Icon = item.icon;
+        const active = pathname === item.href;
+        return (
+          <div key={item.href}>
+            {showSection && (
+              <p className="px-4 pt-4 pb-1 text-[11px] font-semibold tracking-wider text-navy-300">
+                {item.section}
+              </p>
+            )}
+            <Link
+              href={item.href}
+              className={`mx-2 flex items-center justify-between gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
+                active ? 'bg-navy-800 text-white font-medium' : 'text-navy-200 hover:bg-navy-800/60 hover:text-white'
+              }`}
+            >
+              <span className="flex items-center gap-2.5">
+                <Icon className="w-[18px] h-[18px] shrink-0" />
+                {item.label}
+              </span>
+              {item.href === '/admin/validations' && pendingCount > 0 && (
+                <span className="text-[11px] bg-red-500 text-white rounded-full px-1.5 py-0.5 leading-none">
+                  {pendingCount}
+                </span>
+              )}
+            </Link>
+          </div>
+        );
+      })}
     </nav>
   );
 
   const accountFooter = (
-    <div className="border-t border-gray-200 p-4">
-      <p className="text-xs text-gray-500 truncate">{user?.email}</p>
-      <button
-        onClick={() => {
-          logout();
-          router.push('/login');
-        }}
-        className="mt-2 text-xs text-red-600 hover:underline"
-      >
-        Keluar
-      </button>
+    <div className="border-t border-navy-800 p-3">
+      <div className="flex items-center gap-2.5 rounded-md px-2 py-2">
+        <div className="w-8 h-8 rounded-full bg-navy-700 text-white flex items-center justify-center text-xs font-semibold shrink-0">
+          {(user?.email || 'A').slice(0, 1).toUpperCase()}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium text-white truncate">{user?.email}</p>
+          <p className="text-[11px] text-navy-300">ADMIN</p>
+        </div>
+        <button
+          onClick={() => {
+            logout();
+            router.push('/login');
+          }}
+          aria-label="Keluar"
+          className="text-navy-300 hover:text-white shrink-0"
+        >
+          <IconLogout className="w-4 h-4" />
+        </button>
+      </div>
     </div>
   );
 
@@ -79,10 +119,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     <RequireAuth role="ADMIN">
       <div className="min-h-screen flex bg-gray-50">
         {/* Desktop sidebar — static, always visible from md breakpoint up */}
-        <aside className="hidden md:flex md:w-56 bg-white border-r border-gray-200 flex-col shrink-0">
-          <div className="px-4 py-4 border-b border-gray-200">
-            <p className="font-semibold text-gray-900">Absensiku</p>
-            <p className="text-xs text-gray-500">Admin Panel</p>
+        <aside className="hidden md:flex md:w-60 bg-navy-900 flex-col shrink-0">
+          <div className="px-4 py-4 border-b border-navy-800 flex items-center gap-2">
+            <div className="w-7 h-7 rounded bg-white/10 flex items-center justify-center text-white text-xs font-bold">
+              P
+            </div>
+            <p className="font-semibold text-white">Pioneer Class</p>
           </div>
           {navList}
           {accountFooter}
@@ -92,18 +134,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         {mobileNavOpen && (
           <div className="fixed inset-0 z-40 md:hidden">
             <div className="absolute inset-0 bg-black/40" onClick={() => setMobileNavOpen(false)} />
-            <aside className="absolute left-0 top-0 bottom-0 w-64 bg-white flex flex-col shadow-xl">
-              <div className="px-4 py-4 border-b border-gray-200 flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-gray-900">Absensiku</p>
-                  <p className="text-xs text-gray-500">Admin Panel</p>
+            <aside className="absolute left-0 top-0 bottom-0 w-64 bg-navy-900 flex flex-col shadow-xl">
+              <div className="px-4 py-4 border-b border-navy-800 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded bg-white/10 flex items-center justify-center text-white text-xs font-bold">
+                    P
+                  </div>
+                  <p className="font-semibold text-white">Pioneer Class</p>
                 </div>
                 <button
                   onClick={() => setMobileNavOpen(false)}
                   aria-label="Tutup menu"
-                  className="text-gray-400 hover:text-gray-600"
+                  className="text-navy-300 hover:text-white"
                 >
-                  ✕
+                  <IconX className="w-5 h-5" />
                 </button>
               </div>
               {navList}
@@ -113,18 +157,23 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         )}
 
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Mobile top bar — hamburger trigger, hidden from md up */}
-          <header className="md:hidden bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-30">
+          {/* Top bar — breadcrumb + notification bell, matches mockup header */}
+          <header className="bg-white border-b border-gray-200 px-4 md:px-6 py-3 flex items-center gap-3 sticky top-0 z-30">
             <button
               onClick={() => setMobileNavOpen(true)}
               aria-label="Buka menu"
-              className="text-gray-600 shrink-0"
+              className="text-gray-600 shrink-0 md:hidden"
             >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M3 12h18M3 6h18M3 18h18" strokeLinecap="round" />
-              </svg>
+              <IconMenu className="w-5 h-5" />
             </button>
-            <p className="font-semibold text-gray-900 text-sm">Absensiku</p>
+            <p className="font-semibold text-gray-900 text-sm flex-1 md:flex-none">Pioneer Class</p>
+            <div className="hidden md:flex flex-1" />
+            <button aria-label="Notifikasi" className="relative text-gray-500 hover:text-gray-800">
+              <IconBell className="w-5 h-5" />
+              {pendingCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500" />
+              )}
+            </button>
           </header>
 
           {/* min-w-0 lets this flex child actually shrink instead of forcing

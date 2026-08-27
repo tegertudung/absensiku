@@ -19,13 +19,19 @@ import privatePackagesRouter from './api/privatePackages';
 import { startOverdueSessionLockJob } from './jobs/lockOverdueSessions';
 import auditLogsRouter from './api/auditLogs';
 import notificationsRouter from './api/notifications';
+import pushRouter from './api/push';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 const ENV = process.env.NODE_ENV || 'development';
 
 // Middleware
-app.use(cors());
+// FRONTEND_URL restricts CORS to the deployed frontend origin in production
+// (comma-separated for multiple, e.g. preview + prod Vercel URLs). Left
+// unset, cors() falls back to allowing any origin — fine for local dev,
+// where the frontend is always http://localhost:3000 anyway.
+const allowedOrigins = process.env.FRONTEND_URL?.split(',').map((o) => o.trim());
+app.use(cors(allowedOrigins ? { origin: allowedOrigins } : undefined));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -53,6 +59,7 @@ app.use('/api/dashboard', dashboardRouter);
 app.use('/api/private-packages', privatePackagesRouter);
 app.use('/api/audit-logs', auditLogsRouter);
 app.use('/api/notifications', notificationsRouter);
+app.use('/api/push', pushRouter);
 
 // 404 handler
 app.use((req, res) => {

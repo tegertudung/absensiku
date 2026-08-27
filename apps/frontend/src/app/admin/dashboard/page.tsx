@@ -45,12 +45,20 @@ export default function AdminDashboardPage() {
       <h1 className="text-xl font-semibold text-gray-900 mb-6">Dashboard</h1>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        {cards.map((c) => (
-          <div key={c.label} className="bg-white rounded-lg border border-gray-200 p-4">
-            <p className="text-xs text-gray-500">{c.label}</p>
-            <p className="text-2xl font-semibold text-gray-900 mt-1">{c.value}</p>
-          </div>
-        ))}
+        {cards.map((c) => {
+          const needsAction = c.label === 'Menunggu Validasi' && c.value > 0;
+          return (
+            <div
+              key={c.label}
+              className={`bg-white rounded-lg border border-gray-200 p-4 ${
+                needsAction ? 'border-l-4 border-l-red-400' : ''
+              }`}
+            >
+              <p className="text-xs text-gray-500">{c.label}</p>
+              <p className="text-2xl font-semibold text-gray-900 mt-1">{c.value}</p>
+            </div>
+          );
+        })}
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 p-4">

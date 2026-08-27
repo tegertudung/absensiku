@@ -59,3 +59,47 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
+// --- Web Push ---------------------------------------------------------
+// Fires even when no tab is open, which is the whole point: this is what
+// actually puts a notification in the phone's system tray, unlike the
+// in-app NotificationBell (which only works while a tab is open and polling).
+
+self.addEventListener('push', (event) => {
+  let data = { title: 'Absensiku', body: 'Anda memiliki notifikasi baru.' };
+  if (event.data) {
+    try {
+      data = { ...data, ...event.data.json() };
+    } catch {
+      data.body = event.data.text();
+    }
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      data: { url: data.url || '/' },
+    })
+  );
+});
+
+// Clicking the system notification focuses an existing tab if one is open,
+// otherwise opens a new one at the relevant page.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = (event.notification.data && event.notification.data.url) || '/';
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url.includes(self.location.origin) && 'focus' in client) {
+          client.navigate(targetUrl);
+          return client.focus();
+        }
+      }
+      return clients.openWindow(targetUrl);
+    })
+  );
+});

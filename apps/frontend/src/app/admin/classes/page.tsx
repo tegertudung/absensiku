@@ -202,7 +202,7 @@ export default function AdminClassesPage() {
           <h1 className="text-xl font-semibold text-gray-900">Mata Pelajaran</h1>
           <button
             onClick={() => setShowSubjectForm(true)}
-            className="rounded-md bg-blue-600 text-white text-sm font-medium px-4 py-2 hover:bg-blue-700"
+            className="rounded-md bg-navy-900 text-white text-sm font-medium px-4 py-2 hover:bg-navy-800"
           >
             + Tambah Mapel
           </button>
@@ -269,7 +269,7 @@ export default function AdminClassesPage() {
           <h1 className="text-xl font-semibold text-gray-900">Kelas Reguler</h1>
           <button
             onClick={() => setShowClassForm(true)}
-            className="rounded-md bg-blue-600 text-white text-sm font-medium px-4 py-2 hover:bg-blue-700"
+            className="rounded-md bg-navy-900 text-white text-sm font-medium px-4 py-2 hover:bg-navy-800"
           >
             + Tambah Kelas
           </button>
@@ -369,7 +369,7 @@ export default function AdminClassesPage() {
             <button
               type="submit"
               disabled={savingSubject}
-              className="w-full rounded-md bg-blue-600 text-white text-sm font-medium py-2 hover:bg-blue-700 disabled:opacity-60"
+              className="w-full rounded-md bg-navy-900 text-white text-sm font-medium py-2 hover:bg-navy-800 disabled:opacity-60"
             >
               {savingSubject ? 'Menyimpan...' : 'Simpan'}
             </button>
@@ -432,7 +432,7 @@ export default function AdminClassesPage() {
             <button
               type="submit"
               disabled={savingClass}
-              className="w-full rounded-md bg-blue-600 text-white text-sm font-medium py-2 hover:bg-blue-700 disabled:opacity-60"
+              className="w-full rounded-md bg-navy-900 text-white text-sm font-medium py-2 hover:bg-navy-800 disabled:opacity-60"
             >
               {savingClass ? 'Menyimpan...' : 'Simpan'}
             </button>
@@ -481,7 +481,7 @@ export default function AdminClassesPage() {
                 <button
                   onClick={enrollStudent}
                   disabled={rosterBusy}
-                  className="rounded-md bg-blue-600 text-white text-sm font-medium px-4 py-2 hover:bg-blue-700 disabled:opacity-60"
+                  className="rounded-md bg-navy-900 text-white text-sm font-medium px-4 py-2 hover:bg-navy-800 disabled:opacity-60"
                 >
                   Tambah
                 </button>

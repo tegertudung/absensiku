@@ -12,6 +12,12 @@ export const metadata: Metadata = {
     statusBarStyle: 'default',
     title: 'Absensiku',
   },
+  other: {
+    // Next's `appleWebApp.capable` only emits the (now-deprecated per Chrome)
+    // apple-mobile-web-app-capable tag. The standard tag is separate and not
+    // covered by the typed Metadata API, so it's added here directly.
+    'mobile-web-app-capable': 'yes',
+  },
   icons: {
     icon: [
       { url: '/icon-192.png', sizes: '192x192', type: 'image/png' },

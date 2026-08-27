@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import api from '@/lib/api';
-import { formatRupiah, formatDate, SESSION_STATUS_LABELS, SESSION_TYPE_LABELS } from '@/lib/format';
+import { formatRupiah, formatDate } from '@/lib/format';
+import { StatusBadge, TypeBadge } from '@/components/StatusBadge';
 
 interface SessionRow {
   id: string;
@@ -68,14 +69,14 @@ export default function TentorRecapPage() {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3">
-        <div className="bg-white rounded-lg border border-gray-200 p-3">
-          <p className="text-xs text-gray-500">Total Sesi</p>
-          <p className="text-xl font-semibold text-gray-900 mt-1">{totalCompleted}</p>
+      <div className="bg-navy-900 rounded-lg p-4 text-white grid grid-cols-2 gap-3">
+        <div>
+          <p className="text-xs text-navy-200">Total Sesi</p>
+          <p className="text-xl font-semibold mt-1">{totalCompleted}</p>
         </div>
-        <div className="bg-white rounded-lg border border-gray-200 p-3">
-          <p className="text-xs text-gray-500">Estimasi Honor</p>
-          <p className="text-xl font-semibold text-gray-900 mt-1">{formatRupiah(totalHonor)}</p>
+        <div>
+          <p className="text-xs text-navy-200">Estimasi Honor</p>
+          <p className="text-xl font-semibold mt-1">{formatRupiah(totalHonor)}</p>
         </div>
       </div>
 
@@ -125,14 +126,12 @@ export default function TentorRecapPage() {
                   <p className="text-sm font-medium text-gray-900">
                     {s.sessionType === 'REGULAR' ? s.class?.name : s.student?.name}
                   </p>
-                  <p className="text-xs text-gray-500">
-                    {formatDate(s.sessionDate)} &middot; {SESSION_TYPE_LABELS[s.sessionType]} &middot;{' '}
-                    {s.subject?.name}
+                  <p className="text-xs text-gray-500 flex items-center gap-1.5 mt-1">
+                    <TypeBadge type={s.sessionType} />
+                    {formatDate(s.sessionDate)} &middot; {s.subject?.name}
                   </p>
                 </div>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 whitespace-nowrap">
-                  {SESSION_STATUS_LABELS[s.status] ?? s.status}
-                </span>
+                <StatusBadge status={s.status} />
               </div>
               {s.status === 'COMPLETED' && (
                 <p className="text-sm font-medium text-gray-900 mt-2">

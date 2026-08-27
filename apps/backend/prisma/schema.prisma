@@ -25,6 +25,7 @@ model User {
   updatedAt DateTime  @updatedAt
 
   tutor Tutor?
+  pushSubscriptions PushSubscription[]
 
   @@index([email])
   @@index([role])
@@ -382,4 +383,23 @@ model Notification {
 
   @@index([userId])
   @@index([isRead])
+}
+
+// ============================================
+// 17. WEB PUSH SUBSCRIPTIONS
+// ============================================
+// One row per browser/device a user has enabled push notifications on — a user
+// logged in on both their phone and laptop gets two rows, both notified.
+
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

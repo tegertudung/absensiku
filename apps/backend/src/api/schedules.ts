@@ -9,6 +9,7 @@ import {
   getScheduleById,
   updateSchedule,
   setScheduleStatus,
+  findScheduleConflicts,
 } from '../services/scheduleService';
 
 const router = Router();
@@ -21,7 +22,10 @@ function combineDateTime(baseDate: string, time: string): Date {
 }
 
 const createSchema = z.object({
-  tutorId: z.string().uuid('tutorId harus UUID valid'),
+  // Optional because a TENTOR-submitted "Tambah Privat" request is forced to
+  // their own tutorId server-side and doesn't need to send one; ADMIN requests
+  // still must supply it (enforced below, not by the schema).
+  tutorId: z.string().uuid('tutorId harus UUID valid').optional(),
   sessionType: z.enum(['REGULAR', 'PRIVATE']),
   classId: z.string().uuid().optional(),
   studentId: z.string().uuid().optional(),
@@ -34,17 +38,37 @@ const createSchema = z.object({
   notes: z.string().optional(),
 });
 
-// POST /api/schedules — admin membuat jadwal reguler atau privat
-router.post('/', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
+// POST /api/schedules — ADMIN membuat jadwal reguler atau privat untuk tentor manapun.
+// TENTOR juga bisa membuat jadwal PRIVATE untuk siswanya sendiri (mockup "Tambah
+// Privat"); tutorId dipaksa ke akun tentor yang login, dan jenis jadwal dikunci ke
+// PRIVATE — pembuatan kelas REGULAR tetap admin-only karena terikat ke struktur kelas.
+router.post('/', requireAuth, async (req: Request, res: Response) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten().fieldErrors });
   }
 
+  const d = parsed.data;
+  let tutorId = d.tutorId;
+
+  if (req.user!.role === 'TENTOR') {
+    const own = await resolveTutorIdForUser(req.user!.userId);
+    if (!own) return res.status(403).json({ error: 'Forbidden', message: 'Akun tentor tidak ditemukan' });
+    tutorId = own;
+    if (d.sessionType !== 'PRIVATE') {
+      return res
+        .status(403)
+        .json({ error: 'Forbidden', message: 'Tentor hanya dapat membuat jadwal privat' });
+    }
+  } else if (req.user!.role !== 'ADMIN') {
+    return res.status(403).json({ error: 'Forbidden' });
+  } else if (!tutorId) {
+    return res.status(400).json({ error: 'Validation error', message: 'tutorId wajib diisi' });
+  }
+
   try {
-    const d = parsed.data;
     const schedule = await createSchedule({
-      tutorId: d.tutorId,
+      tutorId: tutorId!,
       sessionType: d.sessionType,
       classId: d.classId,
       studentId: d.studentId,
@@ -57,6 +81,45 @@ router.post('/', requireAuth, requireRole('ADMIN'), async (req: Request, res: Re
       notes: d.notes,
     });
     res.status(201).json({ success: true, data: schedule });
+  } catch (err) {
+    handleError(err, res);
+  }
+});
+
+const checkConflictsSchema = z.object({
+  tutorId: z.string().uuid().optional(),
+  dayOfWeek: z.number().int().min(0).max(6),
+  startDate: dateString,
+  startTime: timeString,
+  endTime: timeString,
+});
+
+// POST /api/schedules/check-conflicts — pre-save "Jadwal Bentrok" check (mockup
+// "Tambah Privat" shows this inline before the user submits, not just after).
+router.post('/check-conflicts', requireAuth, async (req: Request, res: Response) => {
+  const parsed = checkConflictsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten().fieldErrors });
+  }
+  const d = parsed.data;
+
+  let tutorId = d.tutorId;
+  if (req.user!.role === 'TENTOR') {
+    const own = await resolveTutorIdForUser(req.user!.userId);
+    if (!own) return res.json({ success: true, data: [] });
+    tutorId = own;
+  } else if (!tutorId) {
+    return res.status(400).json({ error: 'Validation error', message: 'tutorId wajib diisi' });
+  }
+
+  try {
+    const conflicts = await findScheduleConflicts(
+      tutorId!,
+      d.dayOfWeek,
+      combineDateTime(d.startDate, d.startTime),
+      combineDateTime(d.startDate, d.endTime)
+    );
+    res.json({ success: true, data: conflicts });
   } catch (err) {
     handleError(err, res);
   }

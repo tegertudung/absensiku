@@ -45,8 +45,12 @@ export default function LoginPage() {
     <main className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-semibold text-gray-900">Absensiku</h1>
-          <p className="text-sm text-gray-500 mt-1">Sistem Absensi Pioner Class</p>
+          <div className="w-14 h-14 rounded-xl bg-navy-900 text-white flex items-center justify-center text-xl font-bold mx-auto mb-4">
+            P
+          </div>
+          <p className="text-xs font-semibold tracking-widest text-navy-700">PIONEER CLASS</p>
+          <h1 className="text-2xl font-semibold text-gray-900 mt-1">Halo!</h1>
+          <p className="text-sm text-gray-500 mt-1">Masuk ke Sistem Absensi Pioneer Class</p>
         </div>
 
         <form
@@ -62,7 +66,7 @@ export default function LoginPage() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-navy-700"
               placeholder="nama@pionerclass.com"
               autoComplete="email"
             />
@@ -77,7 +81,7 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-navy-700"
               placeholder="••••••••"
               autoComplete="current-password"
             />
@@ -92,9 +96,9 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-md bg-blue-600 text-white text-sm font-medium py-2.5 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition"
+            className="w-full rounded-md bg-navy-900 text-white text-sm font-medium py-2.5 hover:bg-navy-800 disabled:opacity-60 disabled:cursor-not-allowed transition"
           >
-            {loading ? 'Masuk...' : 'Masuk'}
+            {loading ? 'Masuk...' : 'Masuk Sekarang'}
           </button>
         </form>
       </div>

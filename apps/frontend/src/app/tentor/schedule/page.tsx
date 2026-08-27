@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
+import { StatusBadge, TypeBadge } from '@/components/StatusBadge';
 
 interface ScheduleItem {
   id: string;
@@ -26,14 +27,6 @@ interface SessionItem {
 }
 
 const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', "Jum'at", 'Sabtu'];
-
-const STATUS_LABELS: Record<string, string> = {
-  SCHEDULED: 'Terjadwal',
-  IN_PROGRESS: 'Dalam Proses',
-  PENDING_ADMIN: 'Menunggu Admin',
-  COMPLETED: 'Selesai',
-  CANCELLED_NOT_COUNTED: 'Dibatalkan',
-};
 
 // NOTE: startTime/endTime are stored as full DateTime values combined from a
 // date + "HH:mm" at creation time, interpreted in the server's local timezone.
@@ -144,24 +137,23 @@ export default function TentorSchedulePage() {
         ) : (
           <ul className="space-y-2">
             {activeSessions.map((s) => (
-              <li key={s.id} className="bg-white rounded-lg border border-gray-200 p-3">
+              <li key={s.id} className="bg-white rounded-lg border border-gray-200 border-l-4 border-l-amber-400 p-3">
                 <div className="flex justify-between items-start mb-2">
                   <div>
                     <p className="text-sm font-medium text-gray-900">
                       {s.sessionType === 'REGULAR' ? s.class?.name : s.student?.name}
                     </p>
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs text-gray-500 flex items-center gap-1.5 mt-1">
+                      <TypeBadge type={s.sessionType} />
                       {s.subject?.name} &middot; {new Date(s.sessionDate).toLocaleDateString('id-ID')}
                     </p>
                   </div>
-                  <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 whitespace-nowrap">
-                    {STATUS_LABELS[s.status] ?? s.status}
-                  </span>
+                  <StatusBadge status={s.status} />
                 </div>
                 {s.sessionType === 'REGULAR' && (
                   <Link
                     href={`/tentor/sessions/${s.id}/attendance`}
-                    className="block text-center text-xs font-medium text-blue-600 border border-blue-200 rounded-md py-2 mb-2 hover:bg-blue-50"
+                    className="block text-center text-xs font-medium text-navy-900 border border-navy-200 rounded-md py-2 mb-2 hover:bg-navy-50"
                   >
                     Isi Absensi Siswa
                   </Link>
@@ -170,7 +162,7 @@ export default function TentorSchedulePage() {
                   <button
                     onClick={() => completeSession(s.id)}
                     disabled={busyId === s.id}
-                    className="flex-1 text-xs font-medium text-white bg-blue-600 rounded-md py-2 disabled:opacity-60"
+                    className="flex-1 text-xs font-medium text-white bg-navy-900 rounded-md py-2 disabled:opacity-60 hover:bg-navy-800"
                   >
                     {busyId === s.id ? 'Memproses...' : 'Selesaikan'}
                   </button>
@@ -195,22 +187,25 @@ export default function TentorSchedulePage() {
         ) : (
           <ul className="space-y-2">
             {schedules.map((sch) => (
-              <li key={sch.id} className="bg-white rounded-lg border border-gray-200 p-3">
-                <div className="mb-2">
-                  <p className="text-sm font-medium text-gray-900">
-                    {sch.sessionType === 'REGULAR' ? sch.class?.name : sch.student?.name}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {DAY_NAMES[sch.dayOfWeek]}, {formatTime(sch.startTime)}–{formatTime(sch.endTime)}{' '}
-                    &middot; {sch.subject?.name}
-                  </p>
+              <li key={sch.id} className="bg-white rounded-lg border border-gray-200 border-l-4 border-l-navy-200 p-3">
+                <div className="mb-2 flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">
+                      {sch.sessionType === 'REGULAR' ? sch.class?.name : sch.student?.name}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {DAY_NAMES[sch.dayOfWeek]}, {formatTime(sch.startTime)}–{formatTime(sch.endTime)}{' '}
+                      &middot; {sch.subject?.name}
+                    </p>
+                  </div>
+                  <TypeBadge type={sch.sessionType} />
                 </div>
                 <button
                   onClick={() => startSession(sch.id)}
                   disabled={busyId === sch.id}
-                  className="w-full text-xs font-medium text-white bg-green-600 rounded-md py-2 disabled:opacity-60"
+                  className="w-full text-xs font-medium text-white bg-navy-900 rounded-md py-2 disabled:opacity-60 hover:bg-navy-800"
                 >
-                  {busyId === sch.id ? 'Memproses...' : 'Mulai Sesi Hari Ini'}
+                  {busyId === sch.id ? 'Memproses...' : 'Mulai Kelas'}
                 </button>
               </li>
             ))}

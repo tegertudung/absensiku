@@ -50,7 +50,7 @@ export interface ScheduleConflict {
  * are stored combined with an arbitrary date — only the time-of-day matters
  * for a recurring weekly schedule.
  */
-async function findScheduleConflicts(
+export async function findScheduleConflicts(
   tutorId: string,
   dayOfWeek: number,
   startTime: Date,

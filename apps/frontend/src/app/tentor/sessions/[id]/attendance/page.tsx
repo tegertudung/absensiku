@@ -163,7 +163,7 @@ export default function AttendanceFormPage() {
       <button
         onClick={handleSubmit}
         disabled={saving || roster.length === 0}
-        className="w-full text-sm font-medium text-white bg-blue-600 rounded-md py-2.5 disabled:opacity-60"
+        className="w-full text-sm font-medium text-white bg-navy-900 rounded-md py-2.5 disabled:opacity-60"
       >
         {saving ? 'Menyimpan...' : 'Simpan Absensi'}
       </button>

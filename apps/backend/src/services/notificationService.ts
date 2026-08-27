@@ -1,12 +1,13 @@
 import { prisma } from '../utils/prisma';
+import { sendPushToUser } from './pushService';
 
 /**
  * Section J (Notifikasi Tentor): "ketika ada perubahan jadwal atau kelas
- * bentrok." Implemented as simple in-app notifications (polled by the
- * frontend), not push/websocket — no realtime infrastructure exists in this
- * app yet. Schedule-change notifications are wired in; conflict detection
- * ("kelas bentrok") is NOT implemented — flagging that honestly rather than
- * pretending partial coverage is the whole feature.
+ * bentrok." Every notification is written to the DB (polled by the
+ * NotificationBell, works even without push configured) and, best-effort,
+ * also sent as a real Web Push so it reaches the user's phone/desktop even
+ * when the app is closed — see pushService.ts. Push failures never block or
+ * fail notification creation itself.
  */
 export async function createNotification(data: {
   userId: string;
@@ -14,7 +15,7 @@ export async function createNotification(data: {
   message: string;
   type?: string;
 }) {
-  return prisma.notification.create({
+  const notification = await prisma.notification.create({
     data: {
       userId: data.userId,
       title: data.title,
@@ -22,6 +23,12 @@ export async function createNotification(data: {
       type: data.type || 'SCHEDULE_CHANGE',
     },
   });
+
+  sendPushToUser(data.userId, { title: data.title, body: data.message }).catch((err) =>
+    console.error('[push] sendPushToUser failed:', err)
+  );
+
+  return notification;
 }
 
 export async function listNotificationsForUser(userId: string) {
