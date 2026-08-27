@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import api from '@/lib/api';
 
 interface ScheduleItem {
@@ -157,6 +158,14 @@ export default function TentorSchedulePage() {
                     {STATUS_LABELS[s.status] ?? s.status}
                   </span>
                 </div>
+                {s.sessionType === 'REGULAR' && (
+                  <Link
+                    href={`/tentor/sessions/${s.id}/attendance`}
+                    className="block text-center text-xs font-medium text-blue-600 border border-blue-200 rounded-md py-2 mb-2 hover:bg-blue-50"
+                  >
+                    Isi Absensi Siswa
+                  </Link>
+                )}
                 <div className="flex gap-2">
                   <button
                     onClick={() => completeSession(s.id)}
