@@ -1,9 +1,12 @@
+// NOTE: Environment variables are preloaded via `-r dotenv/config` in package.json's
+// dev/start scripts (DOTENV_CONFIG_PATH points at the root .env). This guarantees
+// env vars are set BEFORE any import below runs — critical because importing
+// authRouter transitively constructs the Prisma Client, which needs DATABASE_URL
+// available immediately.
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
-
-// Load environment variables
-dotenv.config({ path: '../../.env' });
+import authRouter from './api/auth';
+import sessionsRouter from './api/sessions';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -23,6 +26,10 @@ app.get('/api/health', (req, res) => {
     uptime: process.uptime(),
   });
 });
+
+// API routes
+app.use('/api/auth', authRouter);
+app.use('/api/sessions', sessionsRouter);
 
 // 404 handler
 app.use((req, res) => {
