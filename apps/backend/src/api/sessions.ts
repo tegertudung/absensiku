@@ -11,11 +11,20 @@ import {
   listSessions,
   listPendingValidations,
   resolveTutorIdForUser,
+  saveSessionDraft,
+  completeSessionsBatch,
 } from '../services/sessionService';
 import { recordAttendance, getAttendanceForSession } from '../services/attendanceService';
 import { lockOverdueSessions } from '../jobs/lockOverdueSessions';
 
 const router = Router();
+const batchSchema = z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), sessionIds: z.array(z.string().uuid()).optional() });
+router.post('/complete-batch', requireAuth, requireRole('TENTOR'), async (req: Request, res: Response) => {
+  const parsed = batchSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten().fieldErrors });
+  try { const tutorId = await resolveTutorIdForUser(req.user!.userId); if (!tutorId) return res.status(403).json({ error: 'Forbidden' }); res.json({ success: true, data: await completeSessionsBatch({ ...parsed.data, date: new Date(parsed.data.date), tutorId, userId: req.user!.userId }) }); }
+  catch (err: any) { if (err?.issues) return res.status(422).json({ success: false, message: err.message, issues: err.issues }); handleError(err, res); }
+});
 
 // SessionError and AppError both carry a numeric .status — the shared handler
 // checks that structurally, so it works uniformly for either error class.
@@ -71,13 +80,25 @@ router.post(
       const actingTutorId =
         req.user!.role === 'TENTOR' ? await resolveTutorIdForUser(req.user!.userId) : null;
 
-      const session = await completeSession(req.params.id, req.user!.userId, actingTutorId);
+      const record = z.object({ material: z.string().optional(), teachingNotes: z.string().optional(), progressNotes: z.string().optional(), score: z.number().nullable().optional() }).safeParse(req.body);
+      if (!record.success) return res.status(400).json({ error: 'Validation error', details: record.error.flatten().fieldErrors });
+      const session = await completeSession(req.params.id, req.user!.userId, actingTutorId, record.data);
       res.json({ success: true, data: session, message: 'Sesi selesai & honor tercatat' });
     } catch (err) {
       handleError(err, res);
     }
   }
 );
+
+const draftSchema = z.object({ material: z.string().optional(), teachingNotes: z.string().optional(), progressNotes: z.string().optional(), score: z.number().nullable().optional() });
+router.patch('/:id/draft', requireAuth, requireRole('TENTOR', 'ADMIN'), async (req: Request, res: Response) => {
+  const parsed = draftSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten().fieldErrors });
+  try {
+    const actingTutorId = req.user!.role === 'TENTOR' ? await resolveTutorIdForUser(req.user!.userId) : null;
+    res.json({ success: true, data: await saveSessionDraft(req.params.id, parsed.data, actingTutorId) });
+  } catch (err) { handleError(err, res); }
+});
 
 // ============================================
 // POST /api/sessions/:id/cancel — day-of cancellation reported by tutor

@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import api from '@/lib/api';
 import Modal from '@/components/Modal';
+import PageHeader from '@/components/PageHeader';
+import StatCard from '@/components/StatCard';
+import SectionCard from '@/components/SectionCard';
+import EmptyState from '@/components/EmptyState';
+import { StatusBadge } from '@/components/StatusBadge';
+import { IconClasses, IconPlus, IconReport } from '@/components/icons';
 
 interface Subject {
   id: string;
@@ -17,6 +23,8 @@ interface ClassItem {
   level: string | null;
   maxStudents: number;
   status: string;
+  quotaTotal?: number;
+  quotaRemaining?: number;
   subject: { name: string } | null;
 }
 
@@ -39,11 +47,14 @@ export default function AdminClassesPage() {
   const [loading, setLoading] = useState(true);
 
   const [showSubjectForm, setShowSubjectForm] = useState(false);
+  const [editingSubjectId, setEditingSubjectId] = useState<string | null>(null);
+  const [deleteSubjectTarget, setDeleteSubjectTarget] = useState<Subject | null>(null);
   const [subjectForm, setSubjectForm] = useState({ name: '', description: '' });
   const [subjectError, setSubjectError] = useState<string | null>(null);
   const [savingSubject, setSavingSubject] = useState(false);
 
   const [showClassForm, setShowClassForm] = useState(false);
+  const [editingClassId, setEditingClassId] = useState<string | null>(null);
   const [classForm, setClassForm] = useState({ name: '', level: '', subjectId: '', maxStudents: '20' });
   const [classError, setClassError] = useState<string | null>(null);
   const [savingClass, setSavingClass] = useState(false);
@@ -56,6 +67,7 @@ export default function AdminClassesPage() {
   const [rosterBusy, setRosterBusy] = useState(false);
 
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [deleteClassTarget, setDeleteClassTarget] = useState<ClassItem | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -86,11 +98,14 @@ export default function AdminClassesPage() {
     }
     setSavingSubject(true);
     try {
-      await api.post('/subjects', {
+      const payload = {
         name: subjectForm.name,
         description: subjectForm.description || undefined,
-      });
+      };
+      if (editingSubjectId) await api.put(`/subjects/${editingSubjectId}`, payload);
+      else await api.post('/subjects', payload);
       setShowSubjectForm(false);
+      setEditingSubjectId(null);
       setSubjectForm({ name: '', description: '' });
       await load();
     } catch (err: any) {
@@ -120,13 +135,16 @@ export default function AdminClassesPage() {
     }
     setSavingClass(true);
     try {
-      await api.post('/classes', {
+      const payload = {
         name: classForm.name,
         level: classForm.level || undefined,
         subjectId: classForm.subjectId || undefined,
         maxStudents: Number(classForm.maxStudents) || undefined,
-      });
+      };
+      if (editingClassId) await api.put(`/classes/${editingClassId}`, payload);
+      else await api.post('/classes', payload);
       setShowClassForm(false);
+      setEditingClassId(null);
       setClassForm({ name: '', level: '', subjectId: '', maxStudents: '20' });
       await load();
     } catch (err: any) {
@@ -145,6 +163,40 @@ export default function AdminClassesPage() {
     } finally {
       setBusyId(null);
     }
+  }
+
+  async function deleteSubject() {
+    if (!deleteSubjectTarget) return;
+    setBusyId(deleteSubjectTarget.id);
+    try { await api.delete(`/subjects/${deleteSubjectTarget.id}`); setDeleteSubjectTarget(null); await load(); }
+    catch (err: any) { setSubjectError(err.response?.data?.message || 'Gagal menghapus mata pelajaran'); }
+    finally { setBusyId(null); }
+  }
+
+  async function deleteClass() {
+    if (!deleteClassTarget) return;
+    setBusyId(deleteClassTarget.id);
+    try {
+      await api.delete(`/classes/${deleteClassTarget.id}`);
+      setDeleteClassTarget(null);
+      await load();
+    } catch (err: any) {
+      setClassError(err.response?.data?.message || 'Gagal menghapus kelas');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function extendClassQuota() {
+    if (!rosterClass) return;
+    setRosterBusy(true);
+    try {
+      await api.post(`/classes/${rosterClass.id}/extend-quota`);
+      await load();
+      setRosterClass((current) => current ? { ...current, quotaTotal: (current.quotaTotal ?? 0) + 24, quotaRemaining: (current.quotaRemaining ?? 0) + 24 } : current);
+    } catch (err: any) {
+      setRosterError(err.response?.data?.message || 'Gagal menambah pertemuan kelas');
+    } finally { setRosterBusy(false); }
   }
 
   async function openRoster(kelas: ClassItem) {
@@ -196,16 +248,12 @@ export default function AdminClassesPage() {
   const availableStudents = students.filter((s) => !enrolledIds.has(s.id));
 
   return (
-    <div className="space-y-8">
-      <div>
+    <div className="space-y-5">
+      <PageHeader title="Kelas & Mapel" description="Kelola kelas, mata pelajaran, dan kuota pertemuan." action={<div className="flex gap-2"><button onClick={() => { setEditingSubjectId(null); setSubjectForm({ name: '', description: '' }); setShowSubjectForm(true); }} className="inline-flex h-10 items-center gap-2 rounded-lg border border-navy-900 px-4 text-sm font-medium text-navy-900 hover:bg-navy-50"><IconReport className="h-4 w-4"/>Tambah Mapel</button><button onClick={() => { setEditingClassId(null); setClassForm({ name: '', level: '', subjectId: '', maxStudents: '20' }); setShowClassForm(true); }} className="inline-flex h-10 items-center gap-2 rounded-lg bg-navy-900 px-4 text-sm font-medium text-white hover:bg-navy-800"><IconPlus className="h-4 w-4"/>Tambah Kelas</button></div>}/>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3"><StatCard label="Total Kelas" value={classes.length} icon={<IconClasses className="h-5 w-5"/>}/><StatCard label="Kelas Aktif" value={classes.filter(c=>c.status==='ACTIVE').length} icon={<IconClasses className="h-5 w-5"/>}/><StatCard label="Mata Pelajaran" value={subjects.filter(s=>s.isActive).length} icon={<IconReport className="h-5 w-5"/>}/></div>
+      <SectionCard title="Mata Pelajaran" description="Daftar mata pelajaran yang dapat digunakan pada kelas dan jadwal.">
         <div className="flex justify-between items-center mb-4">
-          <h1 className="text-xl font-semibold text-gray-900">Mata Pelajaran</h1>
-          <button
-            onClick={() => setShowSubjectForm(true)}
-            className="rounded-md bg-navy-900 text-white text-sm font-medium px-4 py-2 hover:bg-navy-800"
-          >
-            + Tambah Mapel
-          </button>
+          <span className="text-xs text-gray-500">{subjects.length} mata pelajaran</span>
         </div>
 
         <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
@@ -246,15 +294,7 @@ export default function AdminClassesPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      {s.isActive && (
-                        <button
-                          onClick={() => deactivateSubject(s)}
-                          disabled={busyId === s.id}
-                          className="text-xs font-medium text-red-600 disabled:opacity-60"
-                        >
-                          {busyId === s.id ? '...' : 'Nonaktifkan'}
-                        </button>
-                      )}
+                      <div className="flex gap-3 text-xs font-medium"><button onClick={() => { setSubjectForm({ name: s.name, description: s.description || '' }); setEditingSubjectId(s.id); setShowSubjectForm(true); }} className="text-navy-900 hover:underline">Detail</button><button onClick={() => { setSubjectForm({ name: s.name, description: s.description || '' }); setEditingSubjectId(s.id); setShowSubjectForm(true); }} className="text-gray-700 hover:underline">Edit</button><button onClick={() => setDeleteSubjectTarget(s)} className="text-red-600 hover:underline">Hapus</button></div>
                     </td>
                   </tr>
                 ))
@@ -262,17 +302,11 @@ export default function AdminClassesPage() {
             </tbody>
           </table>
         </div>
-      </div>
+      </SectionCard>
 
-      <div>
+      <SectionCard title="Kelas Reguler" description="Kuota pertemuan melekat pada kelas, bukan pada masing-masing siswa.">
         <div className="flex justify-between items-center mb-4">
-          <h1 className="text-xl font-semibold text-gray-900">Kelas Reguler</h1>
-          <button
-            onClick={() => setShowClassForm(true)}
-            className="rounded-md bg-navy-900 text-white text-sm font-medium px-4 py-2 hover:bg-navy-800"
-          >
-            + Tambah Kelas
-          </button>
+          <span className="text-xs text-gray-500">{classes.length} kelas tersedia</span>
         </div>
 
         <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
@@ -282,7 +316,7 @@ export default function AdminClassesPage() {
                 <th className="px-4 py-3 font-medium">Nama Kelas</th>
                 <th className="px-4 py-3 font-medium">Jenjang</th>
                 <th className="px-4 py-3 font-medium">Mata Pelajaran</th>
-                <th className="px-4 py-3 font-medium">Kapasitas</th>
+                <th className="px-4 py-3 font-medium">Sisa Pertemuan</th>
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">Aksi</th>
               </tr>
@@ -306,32 +340,16 @@ export default function AdminClassesPage() {
                     <td className="px-4 py-3 text-gray-900">{c.name}</td>
                     <td className="px-4 py-3 text-gray-600">{c.level || '-'}</td>
                     <td className="px-4 py-3 text-gray-600">{c.subject?.name || '-'}</td>
-                    <td className="px-4 py-3 text-gray-600">{c.maxStudents}</td>
+                    <td className={`px-4 py-3 text-sm font-medium ${(c.quotaRemaining ?? 0) === 0 ? 'text-red-700' : (c.quotaRemaining ?? 999) <= 3 ? 'text-amber-700' : 'text-gray-700'}`}>{c.quotaRemaining ?? '-'} / {c.quotaTotal ?? '-'}</td>
                     <td className="px-4 py-3">
-                      <span
-                        className={`text-xs px-2 py-0.5 rounded-full ${
-                          c.status === 'ACTIVE' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
-                        }`}
-                      >
-                        {c.status === 'ACTIVE' ? 'Aktif' : 'Nonaktif'}
-                      </span>
+                      <StatusBadge status={c.status} />
                     </td>
-                    <td className="px-4 py-3 space-x-3">
-                      <button
-                        onClick={() => openRoster(c)}
-                        className="text-xs font-medium text-blue-600"
-                      >
-                        Kelola Siswa
-                      </button>
-                      {c.status === 'ACTIVE' && (
-                        <button
-                          onClick={() => deactivateClass(c)}
-                          disabled={busyId === c.id}
-                          className="text-xs font-medium text-red-600 disabled:opacity-60"
-                        >
-                          {busyId === c.id ? '...' : 'Nonaktifkan'}
-                        </button>
-                      )}
+                    <td className="px-4 py-3">
+                      <div className="flex gap-3 text-xs font-medium">
+                        <button onClick={() => openRoster(c)} className="text-navy-900 hover:underline">Detail</button>
+                        <button onClick={() => { setEditingClassId(c.id); setClassForm({ name: c.name, level: c.level || '', subjectId: '', maxStudents: String(c.maxStudents) }); setShowClassForm(true); }} className="text-gray-700 hover:underline">Edit</button>
+                        <button onClick={() => setDeleteClassTarget(c)} className="text-red-600 hover:underline">Hapus</button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -339,10 +357,10 @@ export default function AdminClassesPage() {
             </tbody>
           </table>
         </div>
-      </div>
+      </SectionCard>
 
       {showSubjectForm && (
-        <Modal title="Tambah Mata Pelajaran" onClose={() => setShowSubjectForm(false)}>
+        <Modal title={editingSubjectId ? 'Edit Mata Pelajaran' : 'Tambah Mata Pelajaran'} onClose={() => { setShowSubjectForm(false); setEditingSubjectId(null); }}>
           <form onSubmit={handleCreateSubject} className="space-y-3">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Nama</label>
@@ -366,19 +384,13 @@ export default function AdminClassesPage() {
                 {subjectError}
               </p>
             )}
-            <button
-              type="submit"
-              disabled={savingSubject}
-              className="w-full rounded-md bg-navy-900 text-white text-sm font-medium py-2 hover:bg-navy-800 disabled:opacity-60"
-            >
-              {savingSubject ? 'Menyimpan...' : 'Simpan'}
-            </button>
+            <div className="flex justify-end gap-2 border-t border-gray-100 pt-4"><button type="button" onClick={() => setShowSubjectForm(false)} className="rounded-md border border-gray-300 px-4 py-2 text-sm">Batal</button><button type="submit" disabled={savingSubject} className="rounded-md bg-navy-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">{savingSubject ? 'Menyimpan...' : editingSubjectId ? 'Simpan Perubahan' : 'Simpan'}</button></div>
           </form>
         </Modal>
       )}
 
       {showClassForm && (
-        <Modal title="Tambah Kelas" onClose={() => setShowClassForm(false)}>
+        <Modal title={editingClassId ? 'Edit Kelas' : 'Tambah Kelas'} onClose={() => { setShowClassForm(false); setEditingClassId(null); }}>
           <form onSubmit={handleCreateClass} className="space-y-3">
             <div>
               <label className="block text-xs font-medium text-gray-700 mb-1">Nama Kelas</label>
@@ -429,23 +441,19 @@ export default function AdminClassesPage() {
                 {classError}
               </p>
             )}
-            <button
-              type="submit"
-              disabled={savingClass}
-              className="w-full rounded-md bg-navy-900 text-white text-sm font-medium py-2 hover:bg-navy-800 disabled:opacity-60"
-            >
-              {savingClass ? 'Menyimpan...' : 'Simpan'}
-            </button>
+            <div className="flex justify-end gap-2 border-t border-gray-100 pt-4"><button type="button" onClick={() => setShowClassForm(false)} className="rounded-md border border-gray-300 px-4 py-2 text-sm">Batal</button><button type="submit" disabled={savingClass} className="rounded-md bg-navy-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">{savingClass ? 'Menyimpan...' : editingClassId ? 'Simpan Perubahan' : 'Simpan'}</button></div>
           </form>
         </Modal>
       )}
 
       {rosterClass && (
-        <Modal title={`Siswa di ${rosterClass.name}`} onClose={() => setRosterClass(null)}>
+        <Modal title={`Detail Kelas — ${rosterClass.name}`} onClose={() => setRosterClass(null)}>
           {rosterLoading ? (
             <p className="text-sm text-gray-400">Memuat...</p>
           ) : (
             <>
+              <section className="mb-4 rounded-lg border border-navy-100 bg-navy-50 p-3"><p className="text-xs font-semibold text-navy-900">Kuota Pertemuan Kelas</p><p className="mt-1 text-sm text-navy-900">Sisa {rosterClass.quotaRemaining ?? '-'} dari {rosterClass.quotaTotal ?? '-'} pertemuan</p><button onClick={extendClassQuota} disabled={rosterBusy} className="mt-3 rounded-md bg-navy-900 px-3 py-2 text-xs font-medium text-white disabled:opacity-60">{rosterBusy ? 'Memproses...' : 'Tambah 24 Pertemuan'}</button></section>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">Daftar Siswa</p>
               <ul className="divide-y divide-gray-100 mb-4 max-h-48 overflow-y-auto">
                 {roster.length === 0 ? (
                   <li className="py-3 text-sm text-gray-400">Belum ada siswa terdaftar.</li>
@@ -495,6 +503,18 @@ export default function AdminClassesPage() {
             </>
           )}
         </Modal>
+      )}
+
+      {deleteClassTarget && (
+        <Modal title="Hapus Kelas?" onClose={() => setDeleteClassTarget(null)}>
+          <p className="text-sm leading-6 text-gray-600">Kelas &quot;{deleteClassTarget.name}&quot; akan dihapus. Kelas yang masih memiliki jadwal atau riwayat sesi tidak dapat dihapus.</p>
+          {classError && <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{classError}</p>}
+          <div className="mt-5 flex justify-end gap-2"><button onClick={() => setDeleteClassTarget(null)} disabled={busyId === deleteClassTarget.id} className="rounded-md border border-gray-300 px-4 py-2 text-sm">Batal</button><button onClick={deleteClass} disabled={busyId === deleteClassTarget.id} className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">{busyId === deleteClassTarget.id ? 'Menghapus...' : 'Hapus'}</button></div>
+        </Modal>
+      )}
+
+      {deleteSubjectTarget && (
+        <Modal title="Hapus Mata Pelajaran?" onClose={() => setDeleteSubjectTarget(null)}><p className="text-sm leading-6 text-gray-600">Mata pelajaran &quot;{deleteSubjectTarget.name}&quot; akan dihapus. Data yang masih digunakan oleh kelas, jadwal, atau riwayat sesi akan tetap dilindungi.</p>{subjectError && <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{subjectError}</p>}<div className="mt-5 flex justify-end gap-2"><button onClick={() => setDeleteSubjectTarget(null)} className="rounded-md border border-gray-300 px-4 py-2 text-sm">Batal</button><button onClick={deleteSubject} disabled={busyId === deleteSubjectTarget.id} className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-60">{busyId === deleteSubjectTarget.id ? 'Menghapus...' : 'Hapus'}</button></div></Modal>
       )}
     </div>
   );

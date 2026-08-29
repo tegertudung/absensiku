@@ -18,6 +18,7 @@ export async function createTutor(data: {
   bankAccount?: string;
   bankName?: string;
   bankHolderName?: string;
+  title?: string;
 }) {
   const existing = await prisma.user.findUnique({ where: { email: data.email } });
   if (existing) throw new AppError('Email sudah terdaftar', 409);
@@ -39,6 +40,7 @@ export async function createTutor(data: {
         bankAccount: data.bankAccount,
         bankName: data.bankName,
         bankHolderName: data.bankHolderName,
+        title: data.title,
         status: 'ACTIVE',
       },
     });
@@ -73,6 +75,7 @@ export async function updateTutor(
     bankName: string;
     bankHolderName: string;
     notes: string;
+    title: string;
   }>
 ) {
   const tutor = await prisma.tutor.findUnique({ where: { id } });
@@ -107,4 +110,25 @@ export async function setTutorActive(id: string, isActive: boolean, adminId: str
   });
 
   return updated;
+}
+
+/** Tutor history is financial/operational data, so deletion is only allowed
+ * before the tutor has been used by a schedule or teaching session. */
+export async function deleteTutor(id: string, adminId: string) {
+  const tutor = await prisma.tutor.findUnique({
+    where: { id },
+    include: { _count: { select: { schedules: true, sessions: true } } },
+  });
+  if (!tutor) throw new AppError('Tentor tidak ditemukan', 404);
+  if (tutor._count.schedules > 0 || tutor._count.sessions > 0) {
+    throw new AppError('Tentor tidak dapat dihapus karena masih memiliki riwayat mengajar atau jadwal.', 409);
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.user.delete({ where: { id: tutor.userId } });
+    await tx.auditLog.create({
+      data: { tableName: 'tutors', recordId: id, action: 'DELETE', oldValues: { name: tutor.name, email: tutor.email }, changedBy: adminId, reason: 'Tentor dihapus oleh admin' },
+    });
+  });
+  return { id };
 }

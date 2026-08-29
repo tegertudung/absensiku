@@ -1,6 +1,7 @@
 import { prisma } from '../utils/prisma';
 import { getApplicableHonorRate } from './honorService';
 import { logAudit } from '../utils/auditLog';
+import { getProgramForSessionType } from './programService';
 
 export class SessionError extends Error {
   status: number;
@@ -12,7 +13,7 @@ export class SessionError extends Error {
 
 // Statuses from which a session may still be completed or cancelled.
 // COMPLETED and CANCELLED_NOT_COUNTED are terminal (BR-13: further changes need admin correction with audit trail).
-const OPEN_STATUSES = ['SCHEDULED', 'IN_PROGRESS', 'PENDING_ADMIN'];
+const OPEN_STATUSES = ['SCHEDULED', 'IN_PROGRESS'];
 
 // BR-07/AC-05: tentor loses edit rights 3 days after the session date.
 export const OVERDUE_DAYS = 3;
@@ -68,6 +69,11 @@ export async function createSessionFromSchedule(params: {
 
   assertOwnership(params.actingTutorId, schedule.tutorId);
 
+  const existing = await prisma.teachingSession.findFirst({
+    where: { scheduleId: schedule.id, sessionDate: params.sessionDate },
+  });
+  if (existing) throw new SessionError('Sesi untuk jadwal dan tanggal ini sudah ada', 409);
+
   if (schedule.sessionType === 'PRIVATE') {
     if (!schedule.studentId) throw new SessionError('Jadwal privat tidak memiliki siswa', 400);
 
@@ -82,6 +88,14 @@ export async function createSessionFromSchedule(params: {
     }
   }
 
+  if (schedule.sessionType === 'REGULAR') {
+    if (!schedule.classId) throw new SessionError('Jadwal reguler tidak memiliki kelas', 400);
+    const kelas = await prisma.class.findUnique({ where: { id: schedule.classId } });
+    if (!kelas || kelas.quotaRemaining <= 0) {
+      throw new SessionError('Kuota pertemuan kelas ini telah habis. Hubungi Admin untuk menambahkan pertemuan.', 409);
+    }
+  }
+
   return prisma.teachingSession.create({
     data: {
       scheduleId: schedule.id,
@@ -91,6 +105,7 @@ export async function createSessionFromSchedule(params: {
       classId: schedule.classId,
       studentId: schedule.studentId,
       subjectId: schedule.subjectId,
+      programId: schedule.programId ?? (await getProgramForSessionType(schedule.sessionType))?.id,
       status: 'IN_PROGRESS',
       createdBy: params.createdBy,
     },
@@ -106,7 +121,8 @@ export async function createSessionFromSchedule(params: {
 export async function completeSession(
   sessionId: string,
   userId: string,
-  actingTutorId?: string | null
+  actingTutorId?: string | null,
+  record?: { material?: string; teachingNotes?: string; progressNotes?: string; score?: number | null }
 ) {
   return prisma.$transaction(async (tx) => {
     const session = await tx.teachingSession.findUnique({ where: { id: sessionId } });
@@ -125,10 +141,17 @@ export async function completeSession(
       throw new SessionError(`Sesi berstatus "${session.status}" tidak dapat diselesaikan`, 409);
     }
 
+    const material = record?.material?.trim() ?? session.material?.trim();
+    const teachingNotes = record?.teachingNotes ?? session.teachingNotes;
+    const progressNotes = record?.progressNotes?.trim() ?? session.progressNotes?.trim();
+    if (!material) throw new SessionError('Materi hari ini wajib diisi.', 422);
+    if (session.sessionType === 'PRIVATE' && !progressNotes) {
+      throw new SessionError('Catatan perkembangan wajib diisi untuk sesi privat.', 422);
+    }
+
     const rate = await getApplicableHonorRate(
       session.sessionType as 'REGULAR' | 'PRIVATE',
-      session.sessionDate,
-      tx
+      session.sessionDate, tx, session.programId
     );
     if (!rate) {
       throw new SessionError(
@@ -137,6 +160,15 @@ export async function completeSession(
         }. Hubungi admin untuk mengatur master tarif.`,
         422
       );
+    }
+
+    if (session.sessionType === 'REGULAR') {
+      if (!session.classId) throw new SessionError('Sesi reguler tidak memiliki kelas', 400);
+      const updatedClass = await tx.class.updateMany({
+        where: { id: session.classId, quotaRemaining: { gt: 0 } },
+        data: { quotaUsed: { increment: 1 }, quotaRemaining: { decrement: 1 } },
+      });
+      if (updatedClass.count !== 1) throw new SessionError('Kuota pertemuan kelas sudah habis.', 409);
     }
 
     if (session.sessionType === 'PRIVATE') {
@@ -179,11 +211,66 @@ export async function completeSession(
       data: {
         status: 'COMPLETED',
         honorRateSnapshot: rate.nominal,
+        material,
+        teachingNotes: session.sessionType === 'REGULAR' ? teachingNotes?.trim() || null : null,
+        progressNotes: session.sessionType === 'PRIVATE' ? progressNotes : null,
+        score: record?.score ?? session.score,
         completedAt: new Date(),
         updatedBy: userId,
       },
     });
   });
+}
+
+export async function saveSessionDraft(
+  sessionId: string,
+  data: { material?: string; teachingNotes?: string; progressNotes?: string; score?: number | null },
+  actingTutorId?: string | null
+) {
+  const session = await prisma.teachingSession.findUnique({ where: { id: sessionId } });
+  if (!session) throw new SessionError('Sesi tidak ditemukan', 404);
+  assertOwnership(actingTutorId, session.tutorId);
+  if (!OPEN_STATUSES.includes(session.status)) throw new SessionError('Sesi tidak dapat diubah', 409);
+  if (actingTutorId && isOverdue(session.sessionDate)) throw new SessionError('Sesi sudah terkunci dari tentor.', 409);
+  return prisma.teachingSession.update({
+    where: { id: sessionId },
+    data: {
+      material: data.material?.trim() || null,
+      teachingNotes: data.teachingNotes?.trim() || null,
+      progressNotes: data.progressNotes?.trim() || null,
+      score: data.score ?? null,
+    },
+  });
+}
+
+export async function completeSessionsBatch(params: { tutorId: string; date: Date; sessionIds?: string[]; userId: string }) {
+  const start = new Date(params.date); start.setUTCHours(0, 0, 0, 0);
+  const end = new Date(start); end.setUTCDate(end.getUTCDate() + 1);
+  const sessions = await prisma.teachingSession.findMany({
+    where: params.sessionIds?.length ? { id: { in: params.sessionIds } } : { tutorId: params.tutorId, sessionDate: { gte: start, lt: end }, status: 'IN_PROGRESS' },
+    include: { class: true, student: { include: { packages: { where: { status: 'ACTIVE' }, orderBy: { activationDate: 'asc' } } } } },
+  });
+  const issues: Array<{ sessionId: string; code: string; message: string }> = [];
+  if (params.sessionIds && sessions.length !== new Set(params.sessionIds).size) issues.push({ sessionId: '', code: 'NOT_FOUND', message: 'Satu atau lebih sesi tidak ditemukan.' });
+  const regular = new Map<string, number>(); const privateNeeds = new Map<string, number>();
+  for (const s of sessions) {
+    if (s.tutorId !== params.tutorId) issues.push({ sessionId: s.id, code: 'NOT_SESSION_OWNER', message: 'Sesi bukan milik Anda.' });
+    if (s.sessionDate < start || s.sessionDate >= end) issues.push({ sessionId: s.id, code: 'WRONG_DATE', message: 'Sesi di luar tanggal yang dipilih.' });
+    if (s.status === 'PENDING_ADMIN') issues.push({ sessionId: s.id, code: 'PENDING_VALIDATION', message: 'Sesi menunggu validasi.' });
+    else if (!OPEN_STATUSES.includes(s.status)) issues.push({ sessionId: s.id, code: 'INVALID_STATUS', message: 'Status sesi tidak dapat diselesaikan.' });
+    if (!s.material?.trim()) issues.push({ sessionId: s.id, code: 'MATERIAL_REQUIRED', message: 'Materi hari ini belum diisi.' });
+    if (s.sessionType === 'PRIVATE' && !s.progressNotes?.trim()) issues.push({ sessionId: s.id, code: 'PROGRESS_NOTES_REQUIRED', message: 'Catatan perkembangan belum diisi.' });
+    if (s.sessionType === 'REGULAR' && s.classId) regular.set(s.classId, (regular.get(s.classId) ?? 0) + 1);
+    if (s.sessionType === 'PRIVATE' && s.studentId) privateNeeds.set(s.studentId, (privateNeeds.get(s.studentId) ?? 0) + 1);
+  }
+  for (const [classId, count] of regular) { const c = sessions.find((s) => s.classId === classId)?.class; if (!c || c.quotaRemaining < count) issues.push({ sessionId: '', code: 'REGULAR_QUOTA_EMPTY', message: 'Kuota kelas tidak mencukupi.' }); }
+  for (const [studentId, count] of privateNeeds) { const p = sessions.find((s) => s.studentId === studentId)?.student?.packages[0]; if (!p || p.quotaRemaining < count) issues.push({ sessionId: '', code: 'PRIVATE_QUOTA_EMPTY', message: 'Kuota paket privat tidak mencukupi.' }); }
+  if (issues.length) throw Object.assign(new SessionError('Beberapa sesi belum dapat diselesaikan.', 422), { issues });
+  // Individual completion remains the business-rule source of truth. Sessions
+  // are prevalidated as one set; guarded completion prevents negative quota.
+  const completed = [];
+  for (const s of sessions) completed.push(await completeSession(s.id, params.userId, params.tutorId));
+  return { date: start.toISOString().slice(0, 10), completedCount: completed.length, sessions: completed };
 }
 
 /**
@@ -322,8 +409,8 @@ export async function listSessions(filters: {
     },
     include: {
       tutor: { select: { name: true } },
-      class: { select: { name: true } },
-      student: { select: { name: true } },
+      class: { select: { name: true, quotaTotal: true, quotaRemaining: true } },
+      student: { select: { name: true, packages: { where: { status: 'ACTIVE' }, select: { quotaTotal: true, quotaRemaining: true }, take: 1 } } },
       subject: { select: { name: true } },
       schedule: { select: { startTime: true } },
     },

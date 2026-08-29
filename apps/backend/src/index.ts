@@ -20,6 +20,10 @@ import { startOverdueSessionLockJob } from './jobs/lockOverdueSessions';
 import auditLogsRouter from './api/auditLogs';
 import notificationsRouter from './api/notifications';
 import pushRouter from './api/push';
+import programsRouter from './api/programs';
+import settingsRouter from './api/settings';
+import honorSlipRouter from './api/honorSlip';
+import { SETTINGS_UPLOAD_ROOT } from './middleware/settingsUpload';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -34,6 +38,7 @@ const allowedOrigins = process.env.FRONTEND_URL?.split(',').map((o) => o.trim())
 app.use(cors(allowedOrigins ? { origin: allowedOrigins } : undefined));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use('/uploads/settings', express.static(SETTINGS_UPLOAD_ROOT));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -60,6 +65,9 @@ app.use('/api/private-packages', privatePackagesRouter);
 app.use('/api/audit-logs', auditLogsRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/push', pushRouter);
+app.use('/api/programs', programsRouter);
+app.use('/api/settings', settingsRouter);
+app.use('/api/honor', honorSlipRouter);
 
 // 404 handler
 app.use((req, res) => {

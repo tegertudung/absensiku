@@ -47,6 +47,7 @@ model Tutor {
   bankName     String?
   bankHolderName String?
   notes        String?
+  title        String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -56,6 +57,30 @@ model Tutor {
 
   @@index([userId])
   @@index([status])
+}
+
+model Program {
+  id                    String   @id @default(uuid())
+  code                  String   @unique
+  name                  String
+  learningModel         String
+  usesQuota             Boolean  @default(true)
+  defaultMeetingQuota   Int      @default(24)
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  classes               Class[]
+  privatePackages       PrivatePackage[]
+  schedules             Schedule[]
+  sessions              TeachingSession[]
+  honorRates            HonorRate[]
+}
+
+model SystemSetting {
+  key       String   @id
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 // ============================================
@@ -108,17 +133,23 @@ model Class {
   name        String   @unique
   level       String?
   subjectId   String?
+  programId   String?
   maxStudents Int      @default(20)
+  quotaTotal Int      @default(24)
+  quotaUsed Int      @default(0)
+  quotaRemaining Int      @default(24)
   status      String   @default("ACTIVE") // 'ACTIVE' | 'INACTIVE'
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   subject Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  program Program? @relation(fields: [programId], references: [id], onDelete: SetNull)
   schedules Schedule[]
   sessions TeachingSession[]
   enrollments ClassEnrollment[]
 
   @@index([subjectId])
+  @@index([programId])
   @@index([status])
 }
 
@@ -153,6 +184,7 @@ model Schedule {
   classId     String?
   studentId   String?
   subjectId   String?
+  programId   String?
   dayOfWeek   Int      // 0=Sunday, 6=Saturday
   startTime   DateTime
   endTime     DateTime
@@ -167,12 +199,14 @@ model Schedule {
   class Class? @relation(fields: [classId], references: [id], onDelete: SetNull)
   student Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
   subject Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  program Program? @relation(fields: [programId], references: [id], onDelete: SetNull)
   sessions TeachingSession[]
 
   @@index([tutorId])
   @@index([classId])
   @@index([studentId])
   @@index([status])
+  @@index([programId])
 }
 
 // ============================================
@@ -190,8 +224,13 @@ model TeachingSession {
   classId              String?
   studentId            String?
   subjectId            String?
+  programId            String?
   status               String   @default("SCHEDULED")
   honorRateSnapshot    Decimal? // IMMUTABLE - Snapshot at completion time
+  material             String?
+  teachingNotes        String?
+  progressNotes        String?
+  score                Decimal?
   notes                String?
   completedAt          DateTime?
   createdBy            String?
@@ -204,6 +243,7 @@ model TeachingSession {
   class Class? @relation(fields: [classId], references: [id], onDelete: SetNull)
   student Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
   subject Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  program Program? @relation(fields: [programId], references: [id], onDelete: SetNull)
   attendanceRecords AttendanceRecord[]
   packageUsages PrivatePackageUsage[]
   validations SessionValidation[]
@@ -213,6 +253,7 @@ model TeachingSession {
   @@index([status])
   @@index([classId])
   @@index([studentId])
+  @@index([programId])
 }
 
 // ============================================
@@ -242,6 +283,7 @@ model AttendanceRecord {
 model PrivatePackage {
   id             String   @id @default(uuid())
   studentId      String
+  programId      String?
   quotaTotal     Int      @default(24)
   quotaUsed      Int      @default(0)
   quotaRemaining Int      @default(24) // Calculated: quotaTotal - quotaUsed
@@ -257,10 +299,12 @@ model PrivatePackage {
   updatedAt      DateTime @updatedAt
 
   student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  program Program? @relation(fields: [programId], references: [id], onDelete: SetNull)
   usages PrivatePackageUsage[]
 
   @@index([studentId])
   @@index([status])
+  @@index([programId])
 }
 
 // ============================================
@@ -296,6 +340,7 @@ model HonorRate {
   id            String   @id @default(uuid())
   sessionType   String   // 'REGULAR' | 'PRIVATE'
   subjectId     String?
+  programId     String?
   nominal       Decimal
   effectiveFrom DateTime
   effectiveTo   DateTime?
@@ -304,7 +349,10 @@ model HonorRate {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  program Program? @relation(fields: [programId], references: [id], onDelete: SetNull)
+  history HonorRateHistory[]
   @@index([sessionType])
+  @@index([programId])
   @@index([effectiveFrom])
   @@index([status])
 }
@@ -321,6 +369,8 @@ model HonorRateHistory {
   changedBy   String?
   changedAt   DateTime @default(now())
   reason      String?
+
+  rate HonorRate @relation(fields: [rateId], references: [id], onDelete: Cascade)
 
   @@index([rateId])
 }

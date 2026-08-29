@@ -4,6 +4,7 @@ import { requireAuth, requireRole } from '../middleware/auth';
 import { handleError, AppError } from '../utils/errors';
 import { prisma } from '../utils/prisma';
 import { enrollStudent, listClassEnrollments, setEnrollmentStatus } from '../services/enrollmentService';
+import { logAudit } from '../utils/auditLog';
 
 const router = Router();
 
@@ -37,8 +38,82 @@ router.post('/', requireAuth, requireRole('ADMIN'), async (req: Request, res: Re
     const existing = await prisma.class.findUnique({ where: { name: parsed.data.name } });
     if (existing) throw new AppError('Nama kelas sudah digunakan', 409);
 
-    const kelas = await prisma.class.create({ data: parsed.data });
+    const kelas = await prisma.class.create({
+      data: { ...parsed.data, quotaTotal: 24, quotaUsed: 0, quotaRemaining: 24 },
+    });
     res.status(201).json({ success: true, data: kelas });
+  } catch (err) {
+    handleError(err, res);
+  }
+});
+
+router.get('/:id', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
+  try {
+    const kelas = await prisma.class.findUnique({
+      where: { id: req.params.id },
+      include: { subject: { select: { id: true, name: true } }, program: { select: { id: true, name: true } }, _count: { select: { enrollments: true, schedules: true, sessions: true } } },
+    });
+    if (!kelas) throw new AppError('Kelas tidak ditemukan', 404);
+    res.json({ success: true, data: kelas });
+  } catch (err) { handleError(err, res); }
+});
+
+const updateSchema = createSchema.partial();
+router.put('/:id', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
+  const parsed = updateSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten().fieldErrors });
+  try {
+    const existing = await prisma.class.findUnique({ where: { id: req.params.id } });
+    if (!existing) throw new AppError('Kelas tidak ditemukan', 404);
+    const kelas = await prisma.class.update({ where: { id: req.params.id }, data: parsed.data });
+    res.json({ success: true, data: kelas });
+  } catch (err) { handleError(err, res); }
+});
+
+router.delete('/:id', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
+  try {
+    const kelas = await prisma.class.findUnique({ where: { id: req.params.id }, include: { _count: { select: { schedules: true, sessions: true } } } });
+    if (!kelas) throw new AppError('Kelas tidak ditemukan', 404);
+    if (kelas._count.schedules > 0 || kelas._count.sessions > 0) throw new AppError('Kelas tidak dapat dihapus karena masih digunakan oleh jadwal atau riwayat sesi.', 409);
+    await prisma.class.delete({ where: { id: kelas.id } });
+    await logAudit({ tableName: 'classes', recordId: kelas.id, action: 'DELETE', oldValues: { name: kelas.name }, changedBy: req.user!.userId, reason: 'Kelas dihapus oleh admin' });
+    res.json({ success: true, data: { id: kelas.id } });
+  } catch (err) { handleError(err, res); }
+});
+
+// POST /api/classes/:id/extend-quota â€” add one standard 24-meeting cycle.
+router.post('/:id/extend-quota', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
+  try {
+    const existing = await prisma.class.findUnique({ where: { id: req.params.id } });
+    if (!existing) throw new AppError('Kelas tidak ditemukan', 404);
+
+    const kelas = await prisma.$transaction(async (tx) => {
+      const updated = await tx.class.update({
+        where: { id: req.params.id },
+        data: { quotaTotal: { increment: 24 }, quotaRemaining: { increment: 24 } },
+      });
+      return updated;
+    });
+
+    await logAudit({
+      tableName: 'classes',
+      recordId: kelas.id,
+      action: 'UPDATE',
+      oldValues: {
+        quotaTotal: existing.quotaTotal,
+        quotaUsed: existing.quotaUsed,
+        quotaRemaining: existing.quotaRemaining,
+      },
+      newValues: {
+        quotaTotal: kelas.quotaTotal,
+        quotaUsed: kelas.quotaUsed,
+        quotaRemaining: kelas.quotaRemaining,
+      },
+      changedBy: req.user!.userId,
+      reason: 'Tambah 24 pertemuan kelas oleh admin',
+    });
+
+    res.json({ success: true, data: kelas });
   } catch (err) {
     handleError(err, res);
   }

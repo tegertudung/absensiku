@@ -8,14 +8,21 @@ import {
   getStudentById,
   updateStudent,
   setStudentStatus,
+  deleteStudentPermanently,
 } from '../services/studentService';
 import { listEnrollmentsForStudent } from '../services/enrollmentService';
 
 const router = Router();
 
+const studentPhoneSchema = z
+  .string({ required_error: 'Nomor telepon wajib diisi' })
+  .min(1, 'Nomor telepon wajib diisi')
+  .regex(/^\d+$/, 'Nomor telepon hanya boleh berisi angka 0-9')
+  .max(13, 'Nomor telepon maksimal 13 digit');
+
 const createSchema = z.object({
   name: z.string().min(2, 'Nama minimal 2 karakter'),
-  phone: z.string().optional(),
+  phone: studentPhoneSchema,
   email: z.string().email('Email tidak valid').optional(),
   guardianName: z.string().optional(),
   guardianPhone: z.string().optional(),
@@ -65,7 +72,7 @@ router.get('/:id/classes', requireAuth, requireRole('ADMIN'), async (req: Reques
 
 const updateSchema = z.object({
   name: z.string().min(2).optional(),
-  phone: z.string().optional(),
+  phone: studentPhoneSchema,
   email: z.string().email().optional(),
   guardianName: z.string().optional(),
   guardianPhone: z.string().optional(),
@@ -97,6 +104,15 @@ router.patch('/:id/status', requireAuth, requireRole('ADMIN'), async (req: Reque
       success: true,
       data: await setStudentStatus(req.params.id, parsed.data.status, req.user!.userId),
     });
+  } catch (err) {
+    handleError(err, res);
+  }
+});
+
+// DELETE /api/students/:id — explicit, admin-only permanent deletion.
+router.delete('/:id', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
+  try {
+    res.json({ success: true, data: await deleteStudentPermanently(req.params.id, req.user!.userId) });
   } catch (err) {
     handleError(err, res);
   }

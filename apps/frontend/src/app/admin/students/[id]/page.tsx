@@ -14,11 +14,13 @@ interface StudentDetail {
   guardianName: string | null;
   guardianPhone: string | null;
   status: string;
+  packages: Array<{ id: string; packageName: string | null; quotaTotal: number; quotaRemaining: number; status: string }>;
+  enrollments: Array<{ class: { name: string; level: string | null; quotaTotal: number; quotaRemaining: number } }>;
 }
 
 interface ClassEnrollmentRow {
   id: string;
-  class: { name: string; level: string | null };
+  class: { name: string; level: string | null; quotaTotal: number; quotaRemaining: number };
 }
 
 interface SessionRow {
@@ -65,6 +67,7 @@ export default function AdminStudentDetailPage() {
   }, [load]);
 
   const totalCompleted = sessions.filter((s) => s.status === 'COMPLETED').length;
+  const activePackages = student?.packages.filter((pkg) => pkg.status === 'ACTIVE') ?? [];
 
   if (loading) return <p className="text-sm text-gray-400">Memuat...</p>;
   if (!student) return <p className="text-sm text-red-500">Siswa tidak ditemukan.</p>;
@@ -107,6 +110,18 @@ export default function AdminStudentDetailPage() {
         </div>
       </div>
 
+      <h2 className="text-sm font-medium text-gray-900 mb-3">Program & Sisa Sesi</h2>
+      <div className="mb-6 space-y-2 rounded-lg border border-gray-200 bg-white p-4">
+        {student.enrollments.length === 0 && activePackages.length === 0 ? (
+          <p className="text-sm text-gray-400">Belum ada program belajar.</p>
+        ) : (
+          <>
+            {student.enrollments.map((enrollment) => <div key={`regular-${enrollment.class.name}`} className="flex items-center justify-between rounded-md bg-blue-50 px-3 py-2 text-sm"><span><span className="mr-2 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">Reguler</span>{enrollment.class.name}</span><strong className="text-blue-900">{enrollment.class.quotaRemaining} / {enrollment.class.quotaTotal}</strong></div>)}
+            {activePackages.map((pkg) => <div key={`private-${pkg.id}`} className="flex items-center justify-between rounded-md bg-navy-50 px-3 py-2 text-sm"><span><span className="mr-2 rounded-full bg-navy-100 px-2 py-0.5 text-xs font-medium text-navy-800">Privat</span>{pkg.packageName || 'Paket Privat'}</span><strong className="text-navy-900">{pkg.quotaRemaining} / {pkg.quotaTotal}</strong></div>)}
+          </>
+        )}
+      </div>
+
       <h2 className="text-sm font-medium text-gray-900 mb-3">Kelas Reguler</h2>
       <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto mb-6">
         <table className="w-full text-sm">
@@ -114,12 +129,13 @@ export default function AdminStudentDetailPage() {
             <tr className="border-b border-gray-200 text-left text-gray-500">
               <th className="px-4 py-3 font-medium">Nama Kelas</th>
               <th className="px-4 py-3 font-medium">Jenjang</th>
+              <th className="px-4 py-3 font-medium">Sisa Sesi</th>
             </tr>
           </thead>
           <tbody>
             {classes.length === 0 ? (
               <tr>
-                <td colSpan={2} className="px-4 py-6 text-center text-gray-400">
+                <td colSpan={3} className="px-4 py-6 text-center text-gray-400">
                   Belum terdaftar di kelas reguler manapun.
                 </td>
               </tr>
@@ -128,6 +144,7 @@ export default function AdminStudentDetailPage() {
                 <tr key={c.id} className="border-b border-gray-100 last:border-0">
                   <td className="px-4 py-3 text-gray-900">{c.class.name}</td>
                   <td className="px-4 py-3 text-gray-600">{c.class.level || '-'}</td>
+                  <td className="px-4 py-3 text-gray-700">{c.class.quotaRemaining} / {c.class.quotaTotal}</td>
                 </tr>
               ))
             )}

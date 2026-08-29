@@ -11,15 +11,19 @@ type Db = PrismaClient | Prisma.TransactionClient;
 export async function getApplicableHonorRate(
   sessionType: 'REGULAR' | 'PRIVATE',
   sessionDate: Date,
-  db: Db = defaultPrisma
+  db: Db = defaultPrisma,
+  programId?: string | null
 ) {
   return db.honorRate.findFirst({
     where: {
       sessionType,
       status: 'ACTIVE',
       effectiveFrom: { lte: sessionDate },
-      OR: [{ effectiveTo: null }, { effectiveTo: { gte: sessionDate } }],
+      AND: [
+        ...(programId ? [{ OR: [{ programId }, { programId: null }] }] : []),
+        { OR: [{ effectiveTo: null }, { effectiveTo: { gte: sessionDate } }] },
+      ],
     },
-    orderBy: { effectiveFrom: 'desc' },
+    orderBy: [{ programId: 'desc' }, { effectiveFrom: 'desc' }],
   });
 }

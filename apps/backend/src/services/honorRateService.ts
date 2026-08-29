@@ -13,12 +13,14 @@ export async function createHonorRate(data: {
   nominal: number;
   effectiveFrom: Date;
   subjectId?: string;
+  programId?: string;
   notes?: string;
 }) {
   return prisma.$transaction(async (tx) => {
     const previous = await tx.honorRate.findFirst({
       where: {
         sessionType: data.sessionType,
+        programId: data.programId ?? null,
         subjectId: data.subjectId ?? null,
         status: 'ACTIVE',
         effectiveTo: null,
@@ -57,6 +59,7 @@ export async function createHonorRate(data: {
         nominal: data.nominal,
         effectiveFrom: data.effectiveFrom,
         subjectId: data.subjectId,
+        programId: data.programId,
         status: 'ACTIVE',
         notes: data.notes,
       },
@@ -64,10 +67,18 @@ export async function createHonorRate(data: {
   });
 }
 
-export async function listHonorRates(sessionType?: 'REGULAR' | 'PRIVATE') {
+export async function listHonorRates(sessionType?: 'REGULAR' | 'PRIVATE', programId?: string) {
   return prisma.honorRate.findMany({
-    where: sessionType ? { sessionType } : undefined,
+    where: { ...(sessionType ? { sessionType } : {}), ...(programId ? { programId } : {}) },
+    include: { program: true },
     orderBy: [{ sessionType: 'asc' }, { effectiveFrom: 'desc' }],
+  });
+}
+
+export async function listHonorRateHistory() {
+  return prisma.honorRateHistory.findMany({
+    include: { rate: { include: { program: true } } },
+    orderBy: { changedAt: 'desc' },
   });
 }
 

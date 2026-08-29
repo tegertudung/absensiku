@@ -13,7 +13,102 @@ export async function createStudent(data: {
 }
 
 export async function listStudents() {
-  return prisma.student.findMany({ orderBy: { name: 'asc' } });
+  const students = await prisma.student.findMany({
+    include: {
+      enrollments: {
+        where: { status: 'ACTIVE' },
+        include: { class: { select: { id: true, name: true, quotaTotal: true, quotaUsed: true, quotaRemaining: true } } },
+        orderBy: { enrollmentDate: 'asc' },
+      },
+      packages: {
+        where: { status: 'ACTIVE' },
+        select: { id: true, packageName: true, quotaTotal: true, quotaUsed: true, quotaRemaining: true, activationDate: true },
+        orderBy: { activationDate: 'asc' },
+      },
+      _count: {
+        select: { enrollments: true, packages: true, schedules: true, sessions: true },
+      },
+    },
+    orderBy: { name: 'asc' },
+  });
+
+  return students.map(({ enrollments, packages, _count, ...student }) => ({
+    ...student,
+    hasOperationalHistory:
+      _count.enrollments > 0 || _count.packages > 0 || _count.schedules > 0 || _count.sessions > 0,
+    programs: [
+      ...enrollments.map((enrollment) => ({
+        type: 'REGULAR' as const,
+        label: enrollment.class.name,
+        quotaTotal: enrollment.class.quotaTotal,
+        quotaUsed: enrollment.class.quotaUsed,
+        quotaRemaining: enrollment.class.quotaRemaining,
+      })),
+      ...packages.map((pkg) => ({
+        type: 'PRIVATE' as const,
+        label: pkg.packageName || 'Paket Privat',
+        quotaTotal: pkg.quotaTotal,
+        quotaUsed: pkg.quotaUsed,
+        quotaRemaining: pkg.quotaRemaining,
+      })),
+    ],
+  }));
+}
+
+/**
+ * Explicit admin-only hard delete. The operation is deliberately scoped to
+ * student-owned data: private sessions/schedules/packages and enrollments.
+ * Shared regular classes, tutors, subjects, and honor configuration are never
+ * selected here. All work is contained in one transaction.
+ */
+export async function deleteStudentPermanently(id: string, adminId: string) {
+  return prisma.$transaction(async (tx) => {
+    const student = await tx.student.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: { enrollments: true, packages: true, schedules: true, sessions: true },
+        },
+      },
+    });
+    if (!student) throw new AppError('Siswa tidak ditemukan', 404);
+
+    // AttendanceRecord stores studentId without a database FK. Clear both
+    // regular attendance rows for this student and any private-session rows
+    // before the Student is removed, while preserving the regular session.
+    await tx.attendanceRecord.deleteMany({ where: { studentId: id } });
+
+    // Delete student-specific private sessions first. Their SessionValidation,
+    // AttendanceRecord, and PrivatePackageUsage children are cascade-linked.
+    await tx.teachingSession.deleteMany({ where: { studentId: id, sessionType: 'PRIVATE' } });
+
+    // Private schedules belong to the individual student; deleting them also
+    // clears any remaining schedule-owned sessions through the schema cascade.
+    await tx.schedule.deleteMany({ where: { studentId: id, sessionType: 'PRIVATE' } });
+
+    // Package usage is an auditable package ledger, but it is owned by this
+    // student's packages and must not survive a deliberate hard delete.
+    await tx.privatePackageUsage.deleteMany({ where: { package: { studentId: id } } });
+    await tx.privatePackage.deleteMany({ where: { studentId: id } });
+
+    // Remove membership only; never delete the shared regular class, quota,
+    // class schedule, or regular class teaching history.
+    await tx.classEnrollment.deleteMany({ where: { studentId: id } });
+
+    await tx.student.delete({ where: { id } });
+    await tx.auditLog.create({
+      data: {
+        tableName: 'students',
+        recordId: id,
+        action: 'DELETE',
+        oldValues: { name: student.name, phone: student.phone, status: student.status },
+        changedBy: adminId,
+        reason: `STUDENT_DELETED permanen; enrollments=${student._count.enrollments}, packages=${student._count.packages}, schedules=${student._count.schedules}, sessions=${student._count.sessions}`,
+      },
+    });
+
+    return { id };
+  });
 }
 
 export async function getStudentById(id: string) {
@@ -21,6 +116,11 @@ export async function getStudentById(id: string) {
     where: { id },
     include: {
       packages: { orderBy: { activationDate: 'desc' } },
+      enrollments: {
+        where: { status: 'ACTIVE' },
+        include: { class: { select: { name: true, level: true, quotaTotal: true, quotaRemaining: true } } },
+        orderBy: { enrollmentDate: 'asc' },
+      },
     },
   });
   if (!student) throw new AppError('Siswa tidak ditemukan', 404);

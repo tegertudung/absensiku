@@ -8,6 +8,7 @@ import {
   getTutorById,
   updateTutor,
   setTutorActive,
+  deleteTutor,
 } from '../services/tutorService';
 
 const router = Router();
@@ -21,6 +22,7 @@ const createSchema = z.object({
   bankAccount: z.string().optional(),
   bankName: z.string().optional(),
   bankHolderName: z.string().optional(),
+  title: z.string().optional(),
 });
 
 // POST /api/tutors — admin creates a tutor account (User + Tutor)
@@ -67,6 +69,7 @@ const updateSchema = z.object({
   bankName: z.string().optional(),
   bankHolderName: z.string().optional(),
   notes: z.string().optional(),
+  title: z.string().optional(),
 });
 
 // PUT /api/tutors/:id
@@ -98,6 +101,14 @@ router.patch('/:id/deactivate', requireAuth, requireRole('ADMIN'), async (req: R
 router.patch('/:id/activate', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
   try {
     res.json({ success: true, data: await setTutorActive(req.params.id, true, req.user!.userId) });
+  } catch (err) {
+    handleError(err, res);
+  }
+});
+
+router.delete('/:id', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
+  try {
+    res.json({ success: true, data: await deleteTutor(req.params.id, req.user!.userId) });
   } catch (err) {
     handleError(err, res);
   }

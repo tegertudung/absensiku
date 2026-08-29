@@ -21,6 +21,19 @@ import {
   IconLogout,
 } from '@/components/icons';
 
+const PAGE_CONTEXT: Record<string, string> = {
+  '/admin/dashboard': 'Dashboard',
+  '/admin/tutors': 'Tentor',
+  '/admin/students': 'Data Siswa',
+  '/admin/classes': 'Kelas & Mapel',
+  '/admin/schedules': 'Jadwal',
+  '/admin/validations': 'Validasi',
+  '/admin/recap': 'Rekap & Honor',
+  '/admin/honor-rates': 'Master Honor',
+  '/admin/audit-log': 'Audit Log',
+  '/admin/settings': 'Pengaturan',
+};
+
 const NAV_ITEMS = [
   { href: '/admin/dashboard', label: 'Dashboard', icon: IconDashboard, section: null },
   { href: '/admin/tutors', label: 'Tentor', icon: IconTutor, section: 'AKADEMIK' },
@@ -31,6 +44,7 @@ const NAV_ITEMS = [
   { href: '/admin/recap', label: 'Rekap & Honor', icon: IconReport, section: 'LAPORAN' },
   { href: '/admin/honor-rates', label: 'Master Honor', icon: IconReport, section: 'LAPORAN' },
   { href: '/admin/audit-log', label: 'Audit Log', icon: IconSettings, section: 'LAPORAN' },
+  { href: '/admin/settings', label: 'Pengaturan', icon: IconSettings, section: 'PENGATURAN' },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -40,6 +54,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const user = useAuthStore((s) => s.user);
   const [pendingCount, setPendingCount] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const pageContext = PAGE_CONTEXT[pathname] || (pathname.startsWith('/admin/students/') ? 'Detail Siswa' : 'Admin');
 
   useEffect(() => {
     api
@@ -56,7 +71,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   let lastSection: string | null = null;
 
   const navList = (
-    <nav className="flex-1 py-2 overflow-y-auto">
+    <nav className="flex-1 py-3 overflow-y-auto">
       {NAV_ITEMS.map((item) => {
         const showSection = item.section && item.section !== lastSection;
         lastSection = item.section;
@@ -65,14 +80,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         return (
           <div key={item.href}>
             {showSection && (
-              <p className="px-4 pt-4 pb-1 text-[11px] font-semibold tracking-wider text-navy-300">
+              <p className="px-5 pt-5 pb-2 text-[10px] font-semibold tracking-[0.14em] text-navy-300">
                 {item.section}
               </p>
             )}
             <Link
               href={item.href}
-              className={`mx-2 flex items-center justify-between gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
-                active ? 'bg-navy-800 text-white font-medium' : 'text-navy-200 hover:bg-navy-800/60 hover:text-white'
+              className={`mx-3 flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm transition-colors ${
+                active ? 'bg-white/12 text-white font-medium shadow-sm' : 'text-navy-200 hover:bg-white/5 hover:text-white'
               }`}
             >
               <span className="flex items-center gap-2.5">
@@ -92,9 +107,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   );
 
   const accountFooter = (
-    <div className="border-t border-navy-800 p-3">
-      <div className="flex items-center gap-2.5 rounded-md px-2 py-2">
-        <div className="w-8 h-8 rounded-full bg-navy-700 text-white flex items-center justify-center text-xs font-semibold shrink-0">
+    <div className="border-t border-white/10 p-3">
+      <div className="flex items-center gap-2.5 rounded-lg px-2 py-2">
+        <div className="w-9 h-9 rounded-full bg-navy-700 text-white flex items-center justify-center text-xs font-semibold shrink-0 ring-1 ring-white/10">
           {(user?.email || 'A').slice(0, 1).toUpperCase()}
         </div>
         <div className="min-w-0 flex-1">
@@ -107,7 +122,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             router.push('/login');
           }}
           aria-label="Keluar"
-          className="text-navy-300 hover:text-white shrink-0"
+          className="rounded-md p-1.5 text-navy-300 hover:bg-white/10 hover:text-white shrink-0"
         >
           <IconLogout className="w-4 h-4" />
         </button>
@@ -117,14 +132,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   return (
     <RequireAuth role="ADMIN">
-      <div className="min-h-screen flex bg-gray-50">
+      <div className="min-h-screen flex bg-slate-50">
         {/* Desktop sidebar — static, always visible from md breakpoint up */}
-        <aside className="hidden md:flex md:w-60 bg-navy-900 flex-col shrink-0">
-          <div className="px-4 py-4 border-b border-navy-800 flex items-center gap-2">
-            <div className="w-7 h-7 rounded bg-white/10 flex items-center justify-center text-white text-xs font-bold">
+        <aside className="hidden md:flex md:w-64 bg-navy-900 flex-col shrink-0">
+          <div className="px-5 py-5 border-b border-white/10 flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-white text-sm font-bold ring-1 ring-white/10">
               P
             </div>
-            <p className="font-semibold text-white">Pioneer Class</p>
+            <p className="font-semibold tracking-tight text-white">Pioner Class</p>
           </div>
           {navList}
           {accountFooter}
@@ -135,12 +150,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <div className="fixed inset-0 z-40 md:hidden">
             <div className="absolute inset-0 bg-black/40" onClick={() => setMobileNavOpen(false)} />
             <aside className="absolute left-0 top-0 bottom-0 w-64 bg-navy-900 flex flex-col shadow-xl">
-              <div className="px-4 py-4 border-b border-navy-800 flex items-center justify-between">
+              <div className="px-5 py-5 border-b border-white/10 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded bg-white/10 flex items-center justify-center text-white text-xs font-bold">
+                  <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-white text-sm font-bold">
                     P
                   </div>
-                  <p className="font-semibold text-white">Pioneer Class</p>
+                  <p className="font-semibold text-white">Pioner Class</p>
                 </div>
                 <button
                   onClick={() => setMobileNavOpen(false)}
@@ -158,7 +173,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
         <div className="flex-1 flex flex-col min-w-0">
           {/* Top bar — breadcrumb + notification bell, matches mockup header */}
-          <header className="bg-white border-b border-gray-200 px-4 md:px-6 py-3 flex items-center gap-3 sticky top-0 z-30">
+          <header className="min-h-[65px] bg-white border-b border-gray-200 px-4 md:px-6 flex items-center gap-3 sticky top-0 z-30">
             <button
               onClick={() => setMobileNavOpen(true)}
               aria-label="Buka menu"
@@ -166,9 +181,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             >
               <IconMenu className="w-5 h-5" />
             </button>
-            <p className="font-semibold text-gray-900 text-sm flex-1 md:flex-none">Pioneer Class</p>
-            <div className="hidden md:flex flex-1" />
-            <button aria-label="Notifikasi" className="relative text-gray-500 hover:text-gray-800">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-gray-400">Admin</p>
+              <p className="truncate text-sm font-medium text-gray-800">{pageContext}</p>
+            </div>
+            <button aria-label="Notifikasi" className="relative rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-800">
               <IconBell className="w-5 h-5" />
               {pendingCount > 0 && (
                 <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500" />
@@ -178,7 +195,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
           {/* min-w-0 lets this flex child actually shrink instead of forcing
               the page wider than the viewport when wide tables live inside */}
-          <main className="flex-1 p-4 md:p-6 min-w-0">{children}</main>
+          <main className="flex-1 min-w-0 p-4 md:p-6 lg:p-7">{children}</main>
         </div>
       </div>
     </RequireAuth>

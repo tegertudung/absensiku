@@ -1,81 +1,25 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import api from '@/lib/api';
+import PageHeader from '@/components/PageHeader';
+import SectionCard from '@/components/SectionCard';
+import StatCard from '@/components/StatCard';
+import EmptyState from '@/components/EmptyState';
+import { StatusBadge, TypeBadge } from '@/components/StatusBadge';
+import { formatRupiah } from '@/lib/format';
+import { IconCheckCircle, IconClasses, IconPrivate, IconReport, IconSchedule, IconChevronRight, IconPlus } from '@/components/icons';
 
-interface LowQuotaPackage {
-  id: string;
-  quotaRemaining: number;
-  student: { name: string };
-}
-
-interface DashboardData {
-  todaySessionsCount: number;
-  pendingValidationsCount: number;
-  lowQuotaPackages: LowQuotaPackage[];
-  activeTutorsCount: number;
-  activeStudentsCount: number;
-}
+type DashboardData = { todaySessionsCount:number; pendingValidationsCount:number; lowQuotaPackages:Array<{id:string;quotaRemaining:number;quotaTotal:number;student:{name:string}}> ;lowQuotaClasses:Array<{id:string;name:string;quotaRemaining:number;quotaTotal:number}>;activeTutorsCount:number;activeStudentsCount:number;completedSessionsThisMonth:number;estimatedHonorThisMonth:number;lowQuotaThreshold:number;todaySessions:Array<any> };
+const time = (value?: string) => value ? new Date(value).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}) : '-';
 
 export default function AdminDashboardPage() {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    api
-      .get('/dashboard/admin')
-      .then((res) => setData(res.data.data))
-      .catch(() => setError('Gagal memuat dashboard.'))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <p className="text-sm text-gray-400">Memuat dashboard...</p>;
-  if (error || !data) return <p className="text-sm text-red-500">{error ?? 'Data tidak tersedia.'}</p>;
-
-  const cards = [
-    { label: 'Sesi Hari Ini', value: data.todaySessionsCount },
-    { label: 'Menunggu Validasi', value: data.pendingValidationsCount },
-    { label: 'Tentor Aktif', value: data.activeTutorsCount },
-    { label: 'Siswa Aktif', value: data.activeStudentsCount },
-  ];
-
-  return (
-    <div>
-      <h1 className="text-xl font-semibold text-gray-900 mb-6">Dashboard</h1>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        {cards.map((c) => {
-          const needsAction = c.label === 'Menunggu Validasi' && c.value > 0;
-          return (
-            <div
-              key={c.label}
-              className={`bg-white rounded-lg border border-gray-200 p-4 ${
-                needsAction ? 'border-l-4 border-l-red-400' : ''
-              }`}
-            >
-              <p className="text-xs text-gray-500">{c.label}</p>
-              <p className="text-2xl font-semibold text-gray-900 mt-1">{c.value}</p>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <h2 className="text-sm font-medium text-gray-900 mb-3">Siswa Privat dengan Sesi Menipis</h2>
-        {data.lowQuotaPackages.length === 0 ? (
-          <p className="text-sm text-gray-400">Tidak ada siswa dengan kuota menipis.</p>
-        ) : (
-          <ul className="divide-y divide-gray-100">
-            {data.lowQuotaPackages.map((pkg) => (
-              <li key={pkg.id} className="py-2 flex justify-between text-sm">
-                <span className="text-gray-700">{pkg.student.name}</span>
-                <span className="text-amber-600 font-medium">{pkg.quotaRemaining} sesi tersisa</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </div>
-  );
+  const [data,setData]=useState<DashboardData|null>(null);const [loading,setLoading]=useState(true);const [error,setError]=useState('');
+  useEffect(()=>{api.get('/dashboard/admin').then(r=>setData(r.data.data)).catch(()=>setError('Gagal memuat dashboard.')).finally(()=>setLoading(false));},[]);
+  if(loading)return <div className="space-y-5"><div className="h-14 w-80 animate-pulse rounded bg-gray-200"/><div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{Array.from({length:4},(_,i)=><div key={i} className="h-24 animate-pulse rounded-lg bg-gray-200"/>)}</div></div>;
+  if(error||!data)return <SectionCard title="Dashboard"><EmptyState message={error||'Data dashboard tidak tersedia.'}/></SectionCard>;
+  const lowItems=[...data.lowQuotaClasses.map(c=>({id:c.id,name:c.name,type:'REGULAR',remaining:c.quotaRemaining,total:c.quotaTotal})),...data.lowQuotaPackages.map(p=>({id:p.id,name:p.student.name,type:'PRIVATE',remaining:p.quotaRemaining,total:p.quotaTotal}))];
+  const quickActions=[{href:'/admin/schedules',label:'Tambah Jadwal',icon:<IconSchedule className="h-4 w-4"/>},{href:'/admin/students',label:'Tambah Siswa',icon:<IconClasses className="h-4 w-4"/>},{href:'/admin/tutors',label:'Tambah Tentor',icon:<IconPrivate className="h-4 w-4"/>}];
+  return <div className="space-y-5"><PageHeader title="Dashboard" description="Ringkasan aktivitas dan kondisi operasional Pioner Class."/><div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><StatCard label="Tentor Aktif" value={data.activeTutorsCount} helper="tentor" icon={<IconPrivate className="h-5 w-5"/>}/><StatCard label="Siswa Aktif" value={data.activeStudentsCount} helper="siswa" icon={<IconClasses className="h-5 w-5"/>}/><StatCard label="Sesi Hari Ini" value={data.todaySessionsCount} helper="sesi terjadwal" icon={<IconSchedule className="h-5 w-5"/>}/><StatCard label="Honor Bulan Ini" value={formatRupiah(data.estimatedHonorThisMonth)} helper={`${data.completedSessionsThisMonth} sesi selesai`} icon={<IconReport className="h-5 w-5"/>} emphasized/></div><div className="grid gap-5 lg:grid-cols-3"><SectionCard title="Aktivitas Hari Ini" description="Sesi mengajar yang tercatat untuk hari ini." className="lg:col-span-2">{data.todaySessions.length===0?<EmptyState message="Belum ada aktivitas mengajar hari ini."/>:<div className="overflow-x-auto"><table className="w-full min-w-[640px] text-sm"><thead><tr className="border-b bg-slate-50 text-left text-xs text-gray-500"><th className="px-3 py-2">Jam</th><th>Tentor</th><th>Program</th><th>Kelas / Siswa</th><th>Mapel</th><th>Status</th></tr></thead><tbody>{data.todaySessions.map(s=><tr key={s.id} className="border-b border-gray-100"><td className="px-3 py-3 text-gray-600">{time(s.schedule?.startTime)}</td><td className="font-medium text-gray-900">{s.tutor.name}</td><td><TypeBadge type={s.sessionType}/></td><td>{s.sessionType==='REGULAR'?s.class?.name:s.student?.name}</td><td>{s.subject?.name||'-'}</td><td><StatusBadge status={s.status}/></td></tr>)}</tbody></table></div>}</SectionCard><SectionCard title="Perlu Perhatian" description="Item operasional yang memerlukan tindak lanjut.">{data.pendingValidationsCount===0&&lowItems.length===0?<EmptyState title="Semua terkendali" message="Tidak ada item yang memerlukan tindakan Admin saat ini." icon={<IconCheckCircle className="h-4 w-4"/>}/>:<div className="space-y-3">{data.pendingValidationsCount>0&&<Link href="/admin/validations" className="block rounded-md border border-amber-200 bg-amber-50 p-3 text-sm"><p className="font-medium text-amber-800">Validasi menunggu</p><p className="mt-1 text-amber-700">{data.pendingValidationsCount} perlu ditinjau</p></Link>}{lowItems.length>0&&<a href="#kuota-menipis" className="block rounded-md border border-red-100 bg-red-50 p-3 text-sm"><p className="font-medium text-red-700">Kuota menipis</p><p className="mt-1 text-red-600">{lowItems.length} kelas atau paket di bawah batas</p></a>}</div>}</SectionCard></div><div className="grid gap-5 lg:grid-cols-3"><SectionCard title="Kuota Menipis" description={`Sisa kuota hingga ${data.lowQuotaThreshold} sesi.`} className="lg:col-span-2">{lowItems.length===0?<EmptyState title="Kuota masih aman" message="Belum ada kelas atau paket yang mencapai batas peringatan." icon={<IconCheckCircle className="h-4 w-4"/>}/>:<div id="kuota-menipis" className="divide-y divide-gray-100">{lowItems.map(item=><div key={`${item.type}-${item.id}`} className="flex items-center justify-between py-3 text-sm"><div><p className="font-medium text-gray-900">{item.name}</p><div className="mt-1"><TypeBadge type={item.type}/></div></div><p className="font-medium text-amber-700">{item.remaining} / {item.total} sesi</p></div>)}</div>}</SectionCard><SectionCard title="Aksi Cepat" description="Pintasan operasional Admin."><div className="grid gap-2">{quickActions.map(action=><Link key={action.href} href={action.href} className="flex items-center gap-3 rounded-md border border-gray-200 bg-white px-3 py-2.5 text-sm font-medium text-gray-800 transition-colors hover:bg-navy-50 hover:text-navy-900"><span className="text-navy-900">{action.icon}</span><span className="flex-1">{action.label}</span><IconChevronRight className="h-4 w-4 text-gray-400"/></Link>)}</div></SectionCard></div></div>;
 }

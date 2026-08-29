@@ -11,8 +11,8 @@ interface ScheduleItem {
   dayOfWeek: number;
   startTime: string;
   endTime: string;
-  class?: { name: string } | null;
-  student?: { name: string } | null;
+  class?: { name: string; quotaRemaining: number; quotaTotal: number } | null;
+  student?: { name: string; packages?: Array<{ quotaRemaining: number; quotaTotal: number }> } | null;
   subject?: { name: string } | null;
 }
 
@@ -24,6 +24,8 @@ interface SessionItem {
   class?: { name: string } | null;
   student?: { name: string } | null;
   subject?: { name: string } | null;
+  material?: string | null;
+  progressNotes?: string | null;
 }
 
 const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', "Jum'at", 'Sabtu'];
@@ -53,13 +55,17 @@ export default function TentorSchedulePage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState('');
+  const [showBatchConfirm, setShowBatchConfirm] = useState(false);
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [batchError, setBatchError] = useState<string[]>([]);
+  const [batchSuccess, setBatchSuccess] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const [schedRes, sessRes] = await Promise.all([
         api.get('/schedules'),
-        api.get('/sessions', { params: { status: 'IN_PROGRESS' } }),
+        api.get('/sessions', { params: { startDate: todayISODate(), endDate: todayISODate() } }),
       ]);
       setSchedules(schedRes.data.data);
       setActiveSessions(sessRes.data.data);
@@ -100,6 +106,20 @@ export default function TentorSchedulePage() {
     }
   }
 
+  const todaySessions = activeSessions;
+  const readySessions = todaySessions.filter((s) => s.status === 'IN_PROGRESS' && Boolean(s.material?.trim()) && (s.sessionType === 'REGULAR' || Boolean(s.progressNotes?.trim())));
+  const incompleteSessions = todaySessions.filter((s) => s.status === 'IN_PROGRESS' && !readySessions.some((ready) => ready.id === s.id));
+  async function completeBatch() {
+    setBatchBusy(true); setBatchError([]); setBatchSuccess(null);
+    try {
+      const res = await api.post('/sessions/complete-batch', { date: todayISODate(), sessionIds: readySessions.map((s) => s.id) });
+      setShowBatchConfirm(false); setBatchSuccess(`${res.data.data.completedCount} sesi berhasil diselesaikan.`); await load();
+    } catch (err: any) {
+      const data = err.response?.data;
+      setBatchError(data?.issues?.map((issue: any) => issue.message) || [data?.message || 'Gagal menyelesaikan sesi.']);
+    } finally { setBatchBusy(false); }
+  }
+
   async function submitCancellation() {
     if (!cancelTarget) return;
     if (cancelReason.trim().length < 3) {
@@ -129,6 +149,14 @@ export default function TentorSchedulePage() {
           {actionError}
         </p>
       )}
+      {batchSuccess && <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">{batchSuccess}</p>}
+      {batchError.length > 0 && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2"><p className="font-medium">Beberapa sesi belum dapat diselesaikan.</p><ul className="mt-1 list-disc pl-5">{batchError.map((item, index) => <li key={index}>{item}</li>)}</ul></div>}
+
+      <section className="rounded-lg border border-gray-200 bg-white p-4">
+        <h1 className="text-base font-semibold text-gray-900">Jadwal Hari Ini</h1>
+        <div className="mt-3 grid grid-cols-2 gap-3 text-sm"><p>Total Jadwal: <strong>{todaySessions.length}</strong></p><p>Sudah Diisi: <strong>{readySessions.length}</strong></p><p>Belum Lengkap: <strong>{incompleteSessions.length}</strong></p><p>Selesai: <strong>{todaySessions.filter((s) => s.status === 'COMPLETED').length}</strong></p></div>
+        {incompleteSessions.length > 0 && <p className="mt-3 text-xs text-amber-700">{readySessions.length} dari {todaySessions.length} sesi siap diselesaikan. {incompleteSessions.length} sesi belum lengkap.</p>}
+      </section>
 
       <div>
         <h2 className="text-sm font-medium text-gray-900 mb-2">Sesi Aktif</h2>
@@ -150,14 +178,7 @@ export default function TentorSchedulePage() {
                   </div>
                   <StatusBadge status={s.status} />
                 </div>
-                {s.sessionType === 'REGULAR' && (
-                  <Link
-                    href={`/tentor/sessions/${s.id}/attendance`}
-                    className="block text-center text-xs font-medium text-navy-900 border border-navy-200 rounded-md py-2 mb-2 hover:bg-navy-50"
-                  >
-                    Isi Absensi Siswa
-                  </Link>
-                )}
+                <Link href={`/tentor/sessions/${s.id}`} className="block text-center text-xs font-medium text-navy-900 border border-navy-200 rounded-md py-2 mb-2 hover:bg-navy-50">Isi Catatan Sesi</Link>
                 <div className="flex gap-2">
                   <button
                     onClick={() => completeSession(s.id)}
@@ -179,6 +200,11 @@ export default function TentorSchedulePage() {
           </ul>
         )}
       </div>
+
+      <section className="rounded-lg border border-gray-200 bg-white p-4">
+        <button onClick={() => setShowBatchConfirm(true)} disabled={readySessions.length === 0 || batchBusy} className="w-full rounded-md bg-navy-900 py-2.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50">{batchBusy ? 'Menyelesaikan...' : 'Selesaikan Semua Kelas Hari Ini'}</button>
+        {readySessions.length === 0 && <p className="mt-2 text-center text-xs text-gray-500">Belum ada sesi yang siap diselesaikan.</p>}
+      </section>
 
       <div>
         <h2 className="text-sm font-medium text-gray-900 mb-2">Jadwal Rutin</h2>
@@ -202,10 +228,10 @@ export default function TentorSchedulePage() {
                 </div>
                 <button
                   onClick={() => startSession(sch.id)}
-                  disabled={busyId === sch.id}
+                  disabled={busyId === sch.id || (sch.sessionType === 'REGULAR' ? sch.class?.quotaRemaining === 0 : sch.student?.packages?.[0]?.quotaRemaining === 0)}
                   className="w-full text-xs font-medium text-white bg-navy-900 rounded-md py-2 disabled:opacity-60 hover:bg-navy-800"
                 >
-                  {busyId === sch.id ? 'Memproses...' : 'Mulai Kelas'}
+                  {busyId === sch.id ? 'Memproses...' : (sch.sessionType === 'REGULAR' ? sch.class?.quotaRemaining === 0 ? 'Pertemuan Kelas Habis' : 'Mulai Kelas' : sch.student?.packages?.[0]?.quotaRemaining === 0 ? 'Paket Pertemuan Habis' : 'Mulai Kelas')}
                 </button>
               </li>
             ))}
@@ -245,6 +271,8 @@ export default function TentorSchedulePage() {
           </div>
         </div>
       )}
+
+      {showBatchConfirm && <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 px-4"><div className="w-full max-w-sm rounded-lg bg-white p-4"><h3 className="text-base font-semibold text-gray-900">Selesaikan Kelas Hari Ini?</h3><p className="mt-1 text-sm text-gray-600">{readySessions.length} sesi siap diselesaikan.</p><ul className="mt-3 space-y-2 text-xs text-gray-700">{readySessions.map((s) => <li key={s.id}>{s.sessionType === 'REGULAR' ? 'Reguler' : 'Privat'} — {s.sessionType === 'REGULAR' ? s.class?.name : s.student?.name}</li>)}</ul><div className="mt-4 flex gap-2"><button onClick={() => setShowBatchConfirm(false)} disabled={batchBusy} className="flex-1 rounded-md border border-gray-300 py-2 text-xs">Batal</button><button onClick={completeBatch} disabled={batchBusy} className="flex-1 rounded-md bg-navy-900 py-2 text-xs font-medium text-white">{batchBusy ? 'Menyelesaikan...' : `Selesaikan ${readySessions.length} Sesi`}</button></div></div></div>}
     </div>
   );
 }

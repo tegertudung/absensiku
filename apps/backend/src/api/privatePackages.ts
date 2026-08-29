@@ -14,7 +14,7 @@ const router = Router();
 
 const createSchema = z.object({
   studentId: z.string().uuid('studentId harus UUID valid'),
-  quotaTotal: z.number().int().positive('Kuota harus lebih dari 0'),
+  quotaTotal: z.literal(24).optional(),
   packageName: z.string().optional(),
   price: z.number().optional(),
   paymentDate: z.string().optional(),
@@ -32,6 +32,7 @@ router.post('/', requireAuth, requireRole('ADMIN'), async (req: Request, res: Re
   try {
     const pkg = await createPackage({
       ...parsed.data,
+      quotaTotal: 24,
       paymentDate: parsed.data.paymentDate ? new Date(parsed.data.paymentDate) : undefined,
       createdBy: req.user!.userId,
     });
@@ -64,7 +65,7 @@ router.get('/:id', requireAuth, requireRole('ADMIN'), async (req: Request, res: 
 });
 
 const extendSchema = z.object({
-  additionalQuota: z.number().int().positive('Jumlah tambahan kuota harus lebih dari 0'),
+  additionalQuota: z.literal(24).optional(),
   reason: z.string().optional(),
 });
 
@@ -75,7 +76,7 @@ router.post('/:id/extend', requireAuth, requireRole('ADMIN'), async (req: Reques
     return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten().fieldErrors });
   }
   try {
-    const pkg = await extendPackage(req.params.id, parsed.data.additionalQuota, req.user!.userId, parsed.data.reason);
+    const pkg = await extendPackage(req.params.id, 24, req.user!.userId, parsed.data.reason);
     res.json({ success: true, data: pkg });
   } catch (err) {
     handleError(err, res);

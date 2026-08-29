@@ -36,7 +36,7 @@ export async function listClassEnrollments(classId: string) {
 export async function listEnrollmentsForStudent(studentId: string) {
   return prisma.classEnrollment.findMany({
     where: { studentId, status: 'ACTIVE' },
-    include: { class: { select: { name: true, level: true } } },
+    include: { class: { select: { name: true, level: true, quotaTotal: true, quotaRemaining: true } } },
     orderBy: { enrollmentDate: 'asc' },
   });
 }

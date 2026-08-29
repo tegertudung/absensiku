@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import api from '@/lib/api';
 import Modal from '@/components/Modal';
+import PageHeader from '@/components/PageHeader';
+import StatCard from '@/components/StatCard';
+import SectionCard from '@/components/SectionCard';
+import { IconWarning, IconSchedule, IconReport } from '@/components/icons';
 import { formatDate, SESSION_TYPE_LABELS } from '@/lib/format';
 
 interface ValidationItem {
@@ -80,11 +84,13 @@ export default function AdminValidationsPage() {
   }
 
   return (
-    <div>
-      <h1 className="text-xl font-semibold text-gray-900 mb-2">Validasi</h1>
-      <p className="text-sm text-gray-500 mb-6">
-        Kasus pembatalan hari-H, keterlambatan input, dan koreksi khusus yang menunggu keputusan Anda.
-      </p>
+    <div className="space-y-5">
+      <PageHeader title="Validasi" description="Tinjau pengecualian sesi yang memerlukan penanganan atau koreksi Admin." />
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
+        <StatCard label="Menunggu Tindakan" value={validations.length} icon={<IconWarning className="h-5 w-5" />} />
+        <StatCard label="Pembatalan Hari-H" value={validations.filter((item) => item.caseType === 'CANCELLATION_DAY_OF').length} icon={<IconSchedule className="h-5 w-5" />} />
+        <StatCard label="Koreksi & Lainnya" value={validations.filter((item) => item.caseType !== 'CANCELLATION_DAY_OF').length} icon={<IconReport className="h-5 w-5" />} />
+      </div>
 
       {error && !decideTarget && (
         <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2 mb-4">

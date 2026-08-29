@@ -21,6 +21,8 @@ export default function TentorRecapPage() {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [filters, setFilters] = useState({ startDate: '', endDate: '', sessionType: '' });
+  const [slipPeriod, setSlipPeriod] = useState({ month: String(new Date().getMonth() + 1), year: String(new Date().getFullYear()) });
+  const [slipMessage, setSlipMessage] = useState('');
 
   function buildParams() {
     const params: Record<string, string> = {};
@@ -60,6 +62,16 @@ export default function TentorRecapPage() {
     } finally {
       setExporting(false);
     }
+  }
+
+  async function downloadSlip() {
+    setExporting(true);
+    setSlipMessage('');
+    try {
+      const res = await api.get('/honor/slip.pdf', { params: { month: Number(slipPeriod.month), year: Number(slipPeriod.year) }, responseType: 'blob' });
+      const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+      const link = document.createElement('a'); link.href = url; link.download = 'slip-honor.pdf'; link.click(); URL.revokeObjectURL(url);
+    } catch (err: any) { setSlipMessage(err.response?.data?.message || 'Gagal membuat Slip Honor.'); } finally { setExporting(false); }
   }
 
   const totalHonor = sessions
@@ -112,6 +124,8 @@ export default function TentorRecapPage() {
           {exporting ? 'Mengekspor...' : '⬇ Export Rekap Saya'}
         </button>
       </div>
+
+      <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-2"><p className="text-sm font-medium text-gray-900">Slip Honor Tentor</p><div className="grid grid-cols-2 gap-2"><select value={slipPeriod.month} onChange={e=>setSlipPeriod({...slipPeriod,month:e.target.value})} className="rounded-md border border-gray-300 px-2 py-1.5 text-xs">{Array.from({length:12},(_,i)=><option key={i+1} value={i+1}>{new Intl.DateTimeFormat('id-ID',{month:'long'}).format(new Date(2026,i,1))}</option>)}</select><input type="number" min="2000" value={slipPeriod.year} onChange={e=>setSlipPeriod({...slipPeriod,year:e.target.value})} className="rounded-md border border-gray-300 px-2 py-1.5 text-xs"/></div><button onClick={downloadSlip} disabled={exporting} className="w-full text-xs font-medium text-white bg-navy-900 rounded-md py-2 disabled:opacity-60">Unduh Slip Honor</button>{slipMessage&&<p className="text-xs text-red-600">{slipMessage}</p>}</div>
 
       <div className="space-y-2">
         {loading ? (

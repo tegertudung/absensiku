@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { requireAuth, requireRole } from '../middleware/auth';
 import { handleError } from '../utils/errors';
-import { createHonorRate, listHonorRates, deactivateHonorRate } from '../services/honorRateService';
+import { createHonorRate, listHonorRates, listHonorRateHistory, deactivateHonorRate } from '../services/honorRateService';
 
 const router = Router();
 
@@ -11,6 +11,7 @@ const createSchema = z.object({
   nominal: z.number().positive('Nominal harus lebih dari 0'),
   effectiveFrom: z.string().min(10, 'Format tanggal tidak valid (YYYY-MM-DD)'),
   subjectId: z.string().uuid('subjectId harus UUID valid').optional(),
+  programId: z.string().uuid('programId harus UUID valid').optional(),
   notes: z.string().optional(),
 });
 
@@ -35,11 +36,16 @@ router.post('/', requireAuth, requireRole('ADMIN'), async (req: Request, res: Re
 // GET /api/honor-rates?sessionType=REGULAR|PRIVATE
 router.get('/', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
   const sessionType = req.query.sessionType as 'REGULAR' | 'PRIVATE' | undefined;
+  const programId = typeof req.query.programId === 'string' ? req.query.programId : undefined;
   try {
-    res.json({ success: true, data: await listHonorRates(sessionType) });
+    res.json({ success: true, data: await listHonorRates(sessionType, programId) });
   } catch (err) {
     handleError(err, res);
   }
+});
+
+router.get('/history', requireAuth, requireRole('ADMIN'), async (_req: Request, res: Response) => {
+  try { res.json({ success: true, data: await listHonorRateHistory() }); } catch (err) { handleError(err, res); }
 });
 
 const deactivateSchema = z.object({ reason: z.string().optional() });

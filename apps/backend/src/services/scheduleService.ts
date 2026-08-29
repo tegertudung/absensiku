@@ -2,8 +2,11 @@ import { prisma } from '../utils/prisma';
 import { AppError } from '../utils/errors';
 import { logAudit } from '../utils/auditLog';
 import { createNotification } from './notificationService';
+import { getMinimumScheduleStartGapMinutes } from './settingsService';
+import { getProgramForSessionType } from './programService';
 
 const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', "Jum'at", 'Sabtu'];
+export const MIN_SCHEDULE_START_GAP_MINUTES = 30;
 
 function formatScheduleTime(d: Date) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -39,6 +42,7 @@ export interface ScheduleConflict {
   dayOfWeek: number;
   startTime: string;
   endTime: string;
+  startGapMinutes: number;
 }
 
 /**
@@ -65,28 +69,40 @@ export async function findScheduleConflicts(
       id: excludeScheduleId ? { not: excludeScheduleId } : undefined,
     },
     include: {
-      class: { select: { name: true } },
-      student: { select: { name: true } },
+      class: { select: { name: true, quotaTotal: true, quotaRemaining: true } },
+      student: { select: { name: true, packages: { where: { status: 'ACTIVE' }, select: { quotaTotal: true, quotaRemaining: true }, take: 1 } } },
     },
   });
 
   const newStart = timeToMinutes(startTime);
-  const newEnd = timeToMinutes(endTime);
+  // End time is intentionally not part of the locked spacing rule.
 
   return candidates
-    .filter((c) => {
+    .map((c) => {
       const cStart = timeToMinutes(c.startTime);
-      const cEnd = timeToMinutes(c.endTime);
-      return cStart < newEnd && cEnd > newStart; // classic interval overlap test
+      const startGapMinutes = Math.abs(newStart - cStart);
+      return { c, startGapMinutes };
     })
-    .map((c) => ({
+    .map(({ c, startGapMinutes }) => ({
       scheduleId: c.id,
       sessionType: c.sessionType,
       label: c.sessionType === 'REGULAR' ? c.class?.name ?? '-' : c.student?.name ?? '-',
       dayOfWeek: c.dayOfWeek,
       startTime: formatScheduleTime(c.startTime),
       endTime: formatScheduleTime(c.endTime),
+      startGapMinutes,
     }));
+}
+
+async function assertAllowedOverlap(conflicts: ScheduleConflict[], newStartTime: Date) {
+  const minimum = await getMinimumScheduleStartGapMinutes();
+  const blocked = conflicts.find((conflict) => conflict.startGapMinutes < minimum);
+  if (blocked) {
+    const error = new AppError(`Jarak jam mulai dengan jadwal Tentor yang sudah ada kurang dari ${minimum} menit.`, 409) as AppError & { code?: string; details?: unknown };
+    error.code = 'SCHEDULE_START_GAP_TOO_SHORT';
+    error.details = { minimumStartGapMinutes: minimum, actualStartGapMinutes: blocked.startGapMinutes, conflictingScheduleId: blocked.scheduleId, conflictingStartTime: blocked.startTime, newStartTime: formatScheduleTime(newStartTime) };
+    throw error;
+  }
 }
 
 export async function createSchedule(data: {
@@ -117,6 +133,7 @@ export async function createSchedule(data: {
   }
 
   const conflicts = await findScheduleConflicts(data.tutorId, data.dayOfWeek, data.startTime, data.endTime);
+  await assertAllowedOverlap(conflicts, data.startTime);
 
   const schedule = await prisma.schedule.create({
     data: {
@@ -125,6 +142,7 @@ export async function createSchedule(data: {
       classId: data.sessionType === 'REGULAR' ? data.classId : undefined,
       studentId: data.sessionType === 'PRIVATE' ? data.studentId : undefined,
       subjectId: data.subjectId,
+      programId: (await getProgramForSessionType(data.sessionType))?.id,
       dayOfWeek: data.dayOfWeek,
       startTime: data.startTime,
       endTime: data.endTime,
@@ -217,6 +235,11 @@ export async function updateSchedule(
     throw new AppError('Jam mulai harus sebelum jam selesai', 400);
   }
 
+  const nextDay = data.dayOfWeek ?? schedule.dayOfWeek;
+  const nextStart = data.startTime ?? schedule.startTime;
+  const nextEnd = data.endTime ?? schedule.endTime;
+  const conflictsBeforeUpdate = await findScheduleConflicts(schedule.tutorId, nextDay, nextStart, nextEnd, id);
+  await assertAllowedOverlap(conflictsBeforeUpdate, nextStart);
   const updated = await prisma.schedule.update({ where: { id }, data });
 
   let conflicts: ScheduleConflict[] = [];

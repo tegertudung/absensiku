@@ -1,210 +1,24 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
 import Modal from '@/components/Modal';
+import PageHeader from '@/components/PageHeader';
+import SectionCard from '@/components/SectionCard';
+import StatCard from '@/components/StatCard';
+import EmptyState from '@/components/EmptyState';
+import { StatusBadge } from '@/components/StatusBadge';
+import { IconPlus, IconPrivate, IconSearch, IconCheckCircle } from '@/components/icons';
 
-interface Tutor {
-  id: string;
-  name: string;
-  phone: string | null;
-  email: string | null;
-  status: string;
-  user: { email: string; isActive: boolean; lastLogin: string | null };
-}
+type Tutor={id:string;name:string;phone:string|null;title:string|null;email:string|null;status:string;user:{email:string;isActive:boolean;lastLogin:string|null}};
+const initials=(name:string)=>name.trim().split(/\s+/).slice(0,2).map(x=>x[0]).join('').toUpperCase();
 
-export default function AdminTutorsPage() {
-  const [tutors, setTutors] = useState<Tutor[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
-
-  const [form, setForm] = useState({ name: '', email: '', password: '', phone: '' });
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await api.get('/tutors');
-      setTutors(res.data.data);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  async function handleCreate(e: React.FormEvent) {
-    e.preventDefault();
-    setFormError(null);
-
-    if (!form.name || !form.email || form.password.length < 6) {
-      setFormError('Nama, email wajib diisi; password minimal 6 karakter');
-      return;
-    }
-
-    setSaving(true);
-    try {
-      await api.post('/tutors', form);
-      setShowForm(false);
-      setForm({ name: '', email: '', password: '', phone: '' });
-      await load();
-    } catch (err: any) {
-      setFormError(err.response?.data?.message || 'Gagal menambah tentor');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function toggleActive(tutor: Tutor) {
-    setBusyId(tutor.id);
-    try {
-      const action = tutor.status === 'ACTIVE' ? 'deactivate' : 'activate';
-      await api.patch(`/tutors/${tutor.id}/${action}`);
-      await load();
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  return (
-    <div>
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-xl font-semibold text-gray-900">Data Tentor</h1>
-        <button
-          onClick={() => setShowForm(true)}
-          className="rounded-md bg-navy-900 text-white text-sm font-medium px-4 py-2 hover:bg-navy-800"
-        >
-          + Tambah Tentor
-        </button>
-      </div>
-
-      <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-200 text-left text-gray-500">
-              <th className="px-4 py-3 font-medium">Nama</th>
-              <th className="px-4 py-3 font-medium">Email</th>
-              <th className="px-4 py-3 font-medium">Telepon</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium">Login Terakhir</th>
-              <th className="px-4 py-3 font-medium">Aksi</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-gray-400">
-                  Memuat...
-                </td>
-              </tr>
-            ) : tutors.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-gray-400">
-                  Belum ada data tentor.
-                </td>
-              </tr>
-            ) : (
-              tutors.map((t) => (
-                <tr key={t.id} className="border-b border-gray-100 last:border-0">
-                  <td className="px-4 py-3 text-gray-900">
-                    <Link href={`/admin/tutors/${t.id}`} className="text-blue-600 hover:underline">
-                      {t.name}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-gray-600">{t.user.email}</td>
-                  <td className="px-4 py-3 text-gray-600">{t.phone || '-'}</td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full ${
-                        t.status === 'ACTIVE'
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-gray-100 text-gray-500'
-                      }`}
-                    >
-                      {t.status === 'ACTIVE' ? 'Aktif' : 'Nonaktif'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-500">
-                    {t.user.lastLogin ? new Date(t.user.lastLogin).toLocaleString('id-ID') : 'Belum pernah'}
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => toggleActive(t)}
-                      disabled={busyId === t.id}
-                      className={`text-xs font-medium disabled:opacity-60 ${
-                        t.status === 'ACTIVE' ? 'text-red-600' : 'text-green-600'
-                      }`}
-                    >
-                      {busyId === t.id ? '...' : t.status === 'ACTIVE' ? 'Nonaktifkan' : 'Aktifkan'}
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {showForm && (
-        <Modal title="Tambah Tentor" onClose={() => setShowForm(false)}>
-          <form onSubmit={handleCreate} className="space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Nama</label>
-              <input
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
-              <input
-                type="email"
-                value={form.email}
-                onChange={(e) => setForm({ ...form, email: e.target.value })}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Password</label>
-              <input
-                type="password"
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-                placeholder="Minimal 6 karakter"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Telepon (opsional)</label>
-              <input
-                value={form.phone}
-                onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-              />
-            </div>
-
-            {formError && (
-              <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-                {formError}
-              </p>
-            )}
-
-            <button
-              type="submit"
-              disabled={saving}
-              className="w-full rounded-md bg-navy-900 text-white text-sm font-medium py-2 hover:bg-navy-800 disabled:opacity-60"
-            >
-              {saving ? 'Menyimpan...' : 'Simpan'}
-            </button>
-          </form>
-        </Modal>
-      )}
-    </div>
-  );
+export default function AdminTutorsPage(){
+  const [tutors,setTutors]=useState<Tutor[]>([]);const [loading,setLoading]=useState(true);const [error,setError]=useState('');const [showForm,setShowForm]=useState(false);const [saving,setSaving]=useState(false);const [formError,setFormError]=useState('');const [busyId,setBusyId]=useState<string|null>(null);const [search,setSearch]=useState('');const [status,setStatus]=useState('ALL');const [form,setForm]=useState({name:'',email:'',password:'',phone:'',title:''});
+  const load=useCallback(async()=>{setLoading(true);setError('');try{const r=await api.get('/tutors');setTutors(r.data.data);}catch{setError('Gagal memuat data tentor.');}finally{setLoading(false);}},[]);useEffect(()=>{load();},[load]);
+  const visible=useMemo(()=>tutors.filter(t=>(status==='ALL'||t.status===status)&&(`${t.name} ${t.user.email}`).toLowerCase().includes(search.toLowerCase())),[tutors,status,search]);
+  async function create(e:React.FormEvent){e.preventDefault();setFormError('');if(!form.name.trim()||!form.email||form.password.length<6)return setFormError('Nama, email, dan password minimal 6 karakter wajib diisi.');setSaving(true);try{await api.post('/tutors',form);setShowForm(false);setForm({name:'',email:'',password:'',phone:'',title:''});await load();}catch(e:any){setFormError(e.response?.data?.message||'Gagal menambah tentor.');}finally{setSaving(false);}}
+  async function toggle(t:Tutor){setBusyId(t.id);try{await api.patch(`/tutors/${t.id}/${t.status==='ACTIVE'?'deactivate':'activate'}`);await load();}catch{setError('Gagal mengubah status tentor.');}finally{setBusyId(null);}}
+  return <div className="space-y-5"><PageHeader title="Tentor" description="Kelola data tentor dan informasi pengajar Pioner Class." action={<button onClick={()=>setShowForm(true)} className="inline-flex h-10 items-center gap-2 rounded-lg bg-navy-900 px-4 text-sm font-medium text-white hover:bg-navy-800"><IconPlus className="h-4 w-4"/>Tambah Tentor</button>}/><div className="grid grid-cols-2 gap-3 md:grid-cols-3"><StatCard label="Total Tentor" value={tutors.length} icon={<IconPrivate className="h-5 w-5"/>}/><StatCard label="Tentor Aktif" value={tutors.filter(t=>t.status==='ACTIVE').length} icon={<IconCheckCircle className="h-5 w-5"/>}/><StatCard label="Tentor Nonaktif" value={tutors.filter(t=>t.status!=='ACTIVE').length} icon={<IconPrivate className="h-5 w-5"/>}/></div><SectionCard title="Filter Tentor" description="Cari dan saring data tentor."><div className="flex flex-col gap-3 md:flex-row"><div className="relative flex-1"><IconSearch className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Cari nama atau email tentor" className="h-10 w-full rounded-lg border border-gray-300 pl-9 pr-3 text-sm outline-none focus:border-navy-500 focus:ring-2 focus:ring-navy-100"/></div><select value={status} onChange={e=>setStatus(e.target.value)} className="h-10 rounded-lg border border-gray-300 px-3 text-sm outline-none focus:border-navy-500 focus:ring-2 focus:ring-navy-100"><option value="ALL">Semua Status</option><option value="ACTIVE">Aktif</option><option value="INACTIVE">Nonaktif</option></select><button onClick={()=>{setSearch('');setStatus('ALL');}} className="h-10 rounded-lg px-3 text-sm font-medium text-navy-900 hover:bg-navy-50">Reset Filter</button></div></SectionCard><SectionCard title="Data Tentor" description={`${visible.length} tentor ditampilkan.`}>{error?<EmptyState message={error}/>:loading?<div className="h-40 animate-pulse rounded-md bg-slate-100"/>:visible.length===0?<EmptyState title="Belum ada data tentor" message="Tambahkan tentor untuk mulai mengatur jadwal mengajar." icon={<IconPrivate className="h-4 w-4"/>}/>:<div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead><tr className="border-b bg-slate-50 text-left text-xs font-semibold text-gray-500"><th className="px-4 py-3">Tentor</th><th>Email</th><th>No. Telepon</th><th>Status</th><th>Login Terakhir</th><th className="px-4 py-3 text-right">Aksi</th></tr></thead><tbody>{visible.map(t=><tr key={t.id} className="border-b border-gray-100 hover:bg-slate-50"><td className="px-4 py-3"><div className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-navy-100 text-[11px] font-semibold text-navy-800">{initials(t.name)}</span><Link href={`/admin/tutors/${t.id}`} className="font-medium text-gray-900 hover:text-navy-700">{t.name}{t.title?`, ${t.title}`:''}</Link></div></td><td>{t.user.email}</td><td>{t.phone||'-'}</td><td><StatusBadge status={t.status}/></td><td className="text-gray-500">{t.user.lastLogin?new Date(t.user.lastLogin).toLocaleString('id-ID'):'Belum pernah'}</td><td className="px-4 py-3 text-right"><div className="inline-flex gap-3"><Link href={`/admin/tutors/${t.id}`} className="text-xs font-medium text-navy-900 hover:underline">Detail</Link><button onClick={()=>toggle(t)} disabled={busyId===t.id} className={`text-xs font-medium ${t.status==='ACTIVE'?'text-red-600':'text-emerald-700'}`}>{busyId===t.id?'Memproses...':t.status==='ACTIVE'?'Nonaktifkan':'Aktifkan'}</button></div></td></tr>)}</tbody></table></div>}</SectionCard>{showForm&&<Modal title="Tambah Tentor" onClose={()=>!saving&&setShowForm(false)} className="max-w-xl"><form onSubmit={create} className="space-y-4"><p className="text-sm text-gray-500">Lengkapi informasi akun dan profil tentor.</p><div className="grid gap-3 sm:grid-cols-2"><label className="text-xs font-medium text-gray-700 sm:col-span-2">Nama<input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} className="mt-1 h-10 w-full rounded-lg border border-gray-300 px-3 text-sm"/></label><label className="text-xs font-medium text-gray-700">Gelar (opsional)<input value={form.title} onChange={e=>setForm({...form,title:e.target.value})} className="mt-1 h-10 w-full rounded-lg border border-gray-300 px-3 text-sm" placeholder="S.Pd."/></label><label className="text-xs font-medium text-gray-700">No. Telepon<input value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} className="mt-1 h-10 w-full rounded-lg border border-gray-300 px-3 text-sm"/></label><label className="text-xs font-medium text-gray-700 sm:col-span-2">Email<input type="email" value={form.email} onChange={e=>setForm({...form,email:e.target.value})} className="mt-1 h-10 w-full rounded-lg border border-gray-300 px-3 text-sm"/></label><label className="text-xs font-medium text-gray-700 sm:col-span-2">Password<input type="password" value={form.password} onChange={e=>setForm({...form,password:e.target.value})} className="mt-1 h-10 w-full rounded-lg border border-gray-300 px-3 text-sm" placeholder="Minimal 6 karakter"/></label></div>{formError&&<p className="rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700">{formError}</p>}<div className="flex justify-end gap-2 border-t pt-4"><button type="button" onClick={()=>setShowForm(false)} className="h-10 rounded-lg border border-gray-300 px-4 text-sm">Batal</button><button disabled={saving} className="h-10 rounded-lg bg-navy-900 px-4 text-sm font-medium text-white disabled:opacity-60">{saving?'Menyimpan...':'Simpan'}</button></div></form></Modal>}</div>;
 }
