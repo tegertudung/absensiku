@@ -8,7 +8,7 @@ export default function RequireAuth({
   role,
   children,
 }: {
-  role: 'ADMIN' | 'TENTOR';
+  role: 'ADMIN' | 'TENTOR' | 'PARENT';
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -22,7 +22,8 @@ export default function RequireAuth({
       return;
     }
     if (user.role !== role) {
-      router.replace(user.role === 'ADMIN' ? '/admin/dashboard' : '/tentor');
+      const home = user.role === 'ADMIN' ? '/admin/dashboard' : user.role === 'TENTOR' ? '/tentor' : '/parent';
+      router.replace(home);
     }
   }, [isHydrated, user, role, router]);
 

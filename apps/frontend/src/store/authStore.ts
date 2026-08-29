@@ -3,7 +3,7 @@ import { create } from 'zustand';
 export interface AuthUser {
   id: string;
   email: string;
-  role: 'ADMIN' | 'TENTOR';
+  role: 'ADMIN' | 'TENTOR' | 'PARENT';
 }
 
 interface AuthState {

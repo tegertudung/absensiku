@@ -31,8 +31,10 @@ export default function LoginPage() {
 
       if (user.role === 'ADMIN') {
         router.push('/admin/dashboard');
-      } else {
+      } else if (user.role === 'TENTOR') {
         router.push('/tentor');
+      } else {
+        router.push('/parent');
       }
     } catch (err: any) {
       setError(err.response?.data?.message || 'Login gagal. Periksa email dan password Anda.');
