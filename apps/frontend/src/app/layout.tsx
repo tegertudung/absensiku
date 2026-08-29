@@ -1,7 +1,18 @@
 import type { Metadata, Viewport } from 'next';
+import { Plus_Jakarta_Sans } from 'next/font/google';
 import './globals.css';
 import AuthHydrator from '@/components/AuthHydrator';
 import ServiceWorkerRegister from '@/components/ServiceWorkerRegister';
+
+// Self-hosted at build time by next/font (no runtime request to Google, so
+// it still works offline once cached) — the mobile design system's only
+// typeface. Exposed as a CSS variable so Tailwind's `font-sans` (see
+// tailwind.config.js) resolves to it with a normal-sans fallback.
+const plusJakartaSans = Plus_Jakarta_Sans({
+  subsets: ['latin'],
+  variable: '--font-plus-jakarta-sans',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'Absensiku - Sistem Absensi Pioner Class',
@@ -28,7 +39,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#2563eb',
+  themeColor: '#001936',
   width: 'device-width',
   initialScale: 1,
 };
@@ -39,8 +50,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="id">
-      <body>
+    <html lang="id" className={plusJakartaSans.variable}>
+      <body className="font-sans">
         <AuthHydrator />
         <ServiceWorkerRegister />
         {children}
