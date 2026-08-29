@@ -49,16 +49,12 @@ function todayISODate() {
 
 export default function TentorSchedulePage() {
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
-  const [activeSessions, setActiveSessions] = useState<SessionItem[]>([]);
+  const [todaySessions, setTodaySessions] = useState<SessionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState('');
-  const [showBatchConfirm, setShowBatchConfirm] = useState(false);
-  const [batchBusy, setBatchBusy] = useState(false);
-  const [batchError, setBatchError] = useState<string[]>([]);
-  const [batchSuccess, setBatchSuccess] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,7 +64,7 @@ export default function TentorSchedulePage() {
         api.get('/sessions', { params: { startDate: todayISODate(), endDate: todayISODate() } }),
       ]);
       setSchedules(schedRes.data.data);
-      setActiveSessions(sessRes.data.data);
+      setTodaySessions(sessRes.data.data);
     } catch {
       setActionError('Gagal memuat data jadwal.');
     } finally {
@@ -79,6 +75,13 @@ export default function TentorSchedulePage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // "Sesi Aktif" only ever shows sessions still needing action from the
+  // tentor. Once a session is COMPLETED, its card (and the Isi Catatan
+  // Sesi / Selesaikan / Laporkan Pembatalan buttons on it) simply
+  // disappears from this list instead of lingering with stale buttons.
+  const activeSessions = todaySessions.filter((s) => s.status === 'IN_PROGRESS');
+  const completedTodayCount = todaySessions.filter((s) => s.status === 'COMPLETED').length;
 
   async function startSession(scheduleId: string) {
     setActionError(null);
@@ -104,20 +107,6 @@ export default function TentorSchedulePage() {
     } finally {
       setBusyId(null);
     }
-  }
-
-  const todaySessions = activeSessions;
-  const readySessions = todaySessions.filter((s) => s.status === 'IN_PROGRESS' && Boolean(s.material?.trim()) && (s.sessionType === 'REGULAR' || Boolean(s.progressNotes?.trim())));
-  const incompleteSessions = todaySessions.filter((s) => s.status === 'IN_PROGRESS' && !readySessions.some((ready) => ready.id === s.id));
-  async function completeBatch() {
-    setBatchBusy(true); setBatchError([]); setBatchSuccess(null);
-    try {
-      const res = await api.post('/sessions/complete-batch', { date: todayISODate(), sessionIds: readySessions.map((s) => s.id) });
-      setShowBatchConfirm(false); setBatchSuccess(`${res.data.data.completedCount} sesi berhasil diselesaikan.`); await load();
-    } catch (err: any) {
-      const data = err.response?.data;
-      setBatchError(data?.issues?.map((issue: any) => issue.message) || [data?.message || 'Gagal menyelesaikan sesi.']);
-    } finally { setBatchBusy(false); }
   }
 
   async function submitCancellation() {
@@ -149,13 +138,14 @@ export default function TentorSchedulePage() {
           {actionError}
         </p>
       )}
-      {batchSuccess && <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">{batchSuccess}</p>}
-      {batchError.length > 0 && <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2"><p className="font-medium">Beberapa sesi belum dapat diselesaikan.</p><ul className="mt-1 list-disc pl-5">{batchError.map((item, index) => <li key={index}>{item}</li>)}</ul></div>}
 
       <section className="rounded-lg border border-gray-200 bg-white p-4">
         <h1 className="text-base font-semibold text-gray-900">Jadwal Hari Ini</h1>
-        <div className="mt-3 grid grid-cols-2 gap-3 text-sm"><p>Total Jadwal: <strong>{todaySessions.length}</strong></p><p>Sudah Diisi: <strong>{readySessions.length}</strong></p><p>Belum Lengkap: <strong>{incompleteSessions.length}</strong></p><p>Selesai: <strong>{todaySessions.filter((s) => s.status === 'COMPLETED').length}</strong></p></div>
-        {incompleteSessions.length > 0 && <p className="mt-3 text-xs text-amber-700">{readySessions.length} dari {todaySessions.length} sesi siap diselesaikan. {incompleteSessions.length} sesi belum lengkap.</p>}
+        <div className="mt-3 grid grid-cols-3 gap-3 text-sm">
+          <p>Total: <strong>{todaySessions.length}</strong></p>
+          <p>Berlangsung: <strong>{activeSessions.length}</strong></p>
+          <p>Selesai: <strong>{completedTodayCount}</strong></p>
+        </div>
       </section>
 
       <div>
@@ -200,11 +190,6 @@ export default function TentorSchedulePage() {
           </ul>
         )}
       </div>
-
-      <section className="rounded-lg border border-gray-200 bg-white p-4">
-        <button onClick={() => setShowBatchConfirm(true)} disabled={readySessions.length === 0 || batchBusy} className="w-full rounded-md bg-navy-900 py-2.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50">{batchBusy ? 'Menyelesaikan...' : 'Selesaikan Semua Kelas Hari Ini'}</button>
-        {readySessions.length === 0 && <p className="mt-2 text-center text-xs text-gray-500">Belum ada sesi yang siap diselesaikan.</p>}
-      </section>
 
       <div>
         <h2 className="text-sm font-medium text-gray-900 mb-2">Jadwal Rutin</h2>
@@ -277,8 +262,6 @@ export default function TentorSchedulePage() {
           </div>
         </div>
       )}
-
-      {showBatchConfirm && <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/40 px-4"><div className="w-full max-w-sm rounded-lg bg-white p-4"><h3 className="text-base font-semibold text-gray-900">Selesaikan Kelas Hari Ini?</h3><p className="mt-1 text-sm text-gray-600">{readySessions.length} sesi siap diselesaikan.</p><ul className="mt-3 space-y-2 text-xs text-gray-700">{readySessions.map((s) => <li key={s.id}>{s.sessionType === 'REGULAR' ? 'Reguler' : 'Privat'} — {s.sessionType === 'REGULAR' ? s.class?.name : s.student?.name}</li>)}</ul><div className="mt-4 flex gap-2"><button onClick={() => setShowBatchConfirm(false)} disabled={batchBusy} className="flex-1 rounded-md border border-gray-300 py-2 text-xs">Batal</button><button onClick={completeBatch} disabled={batchBusy} className="flex-1 rounded-md bg-navy-900 py-2 text-xs font-medium text-white">{batchBusy ? 'Menyelesaikan...' : `Selesaikan ${readySessions.length} Sesi`}</button></div></div></div>}
     </div>
   );
 }
