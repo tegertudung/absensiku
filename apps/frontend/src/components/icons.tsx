@@ -64,6 +64,17 @@ export function IconPrivate({ className }: IconProps) {
   );
 }
 
+export function IconParent({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="8.5" cy="7" r="3.2" />
+      <path d="M2.5 20.2c0-3.3 2.7-5.7 6-5.7" />
+      <circle cx="17.5" cy="16.2" r="2.3" />
+      <path d="M13.3 21c0-2.1 1.9-3.7 4.2-3.7s4.2 1.6 4.2 3.7" />
+    </svg>
+  );
+}
+
 export function IconSchedule({ className }: IconProps) {
   return (
     <svg {...base} className={className}>

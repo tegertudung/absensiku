@@ -12,6 +12,7 @@ import {
   IconTutor,
   IconClasses,
   IconPrivate,
+  IconParent,
   IconSchedule,
   IconReport,
   IconSettings,
@@ -25,6 +26,7 @@ const PAGE_CONTEXT: Record<string, string> = {
   '/admin/dashboard': 'Dashboard',
   '/admin/tutors': 'Tentor',
   '/admin/students': 'Data Siswa',
+  '/admin/parents': 'Orang Tua',
   '/admin/classes': 'Kelas & Mapel',
   '/admin/schedules': 'Jadwal',
   '/admin/validations': 'Validasi',
@@ -34,10 +36,13 @@ const PAGE_CONTEXT: Record<string, string> = {
   '/admin/settings': 'Pengaturan',
 };
 
+// NOTE: only the "Orang Tua" entry is new here — everything else is
+// untouched, existing admin navigation.
 const NAV_ITEMS = [
   { href: '/admin/dashboard', label: 'Dashboard', icon: IconDashboard, section: null },
   { href: '/admin/tutors', label: 'Tentor', icon: IconTutor, section: 'AKADEMIK' },
   { href: '/admin/students', label: 'Siswa', icon: IconStudent, section: 'AKADEMIK' },
+  { href: '/admin/parents', label: 'Orang Tua', icon: IconParent, section: 'AKADEMIK' },
   { href: '/admin/classes', label: 'Kelas & Mapel', icon: IconClasses, section: 'AKADEMIK' },
   { href: '/admin/schedules', label: 'Jadwal', icon: IconSchedule, section: 'AKADEMIK' },
   { href: '/admin/validations', label: 'Validasi', icon: IconPrivate, section: 'AKADEMIK' },
