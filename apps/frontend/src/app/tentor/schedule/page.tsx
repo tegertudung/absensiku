@@ -233,6 +233,12 @@ export default function TentorSchedulePage() {
                 >
                   {busyId === sch.id ? 'Memproses...' : (sch.sessionType === 'REGULAR' ? sch.class?.quotaRemaining === 0 ? 'Pertemuan Kelas Habis' : 'Mulai Kelas' : sch.student?.packages?.[0]?.quotaRemaining === 0 ? 'Paket Pertemuan Habis' : 'Mulai Kelas')}
                 </button>
+                <Link
+                  href={`/tentor/schedule/${sch.id}/ajukan`}
+                  className="mt-2 block text-center text-[11px] font-medium text-navy-700 hover:underline"
+                >
+                  Ajukan Perubahan Jadwal
+                </Link>
               </li>
             ))}
           </ul>

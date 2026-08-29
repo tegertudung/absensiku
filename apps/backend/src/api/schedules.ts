@@ -177,17 +177,40 @@ const updateSchema = z.object({
   endTime: timeString.optional(),
   endDate: dateString.optional(),
   notes: z.string().optional(),
+  // Required only when a TENTOR submits this (enforced below, not by the
+  // schema, so ADMIN edits don't need to carry a reason).
+  reason: z.string().optional(),
 });
 
-// PUT /api/schedules/:id
-router.put('/:id', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
+// PUT /api/schedules/:id — ADMIN can edit any schedule freely. TENTOR can
+// edit their own ("Ajukan Perubahan Jadwal") with a required reason; it
+// takes effect immediately, same as "Tambah Privat" — no approval step.
+router.put('/:id', requireAuth, async (req: Request, res: Response) => {
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten().fieldErrors });
   }
 
+  const d = parsed.data;
+  let meta: { changedBy: string; reason: string } | undefined;
+
+  if (req.user!.role === 'TENTOR') {
+    const own = await resolveTutorIdForUser(req.user!.userId);
+    if (!own) return res.status(403).json({ error: 'Forbidden', message: 'Akun tentor tidak ditemukan' });
+
+    const existing = await getScheduleById(req.params.id).catch(() => null);
+    if (!existing || existing.tutorId !== own) {
+      return res.status(403).json({ error: 'Forbidden', message: 'Anda tidak memiliki akses ke jadwal ini' });
+    }
+    if (!d.reason || d.reason.trim().length < 3) {
+      return res.status(400).json({ error: 'Validation error', message: 'Alasan perubahan wajib diisi (minimal 3 karakter)' });
+    }
+    meta = { changedBy: req.user!.userId, reason: d.reason.trim() };
+  } else if (req.user!.role !== 'ADMIN') {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
   try {
-    const d = parsed.data;
     const referenceDate = d.startDate ?? new Date().toISOString().split('T')[0];
     const data: Record<string, unknown> = {};
     if (d.notes !== undefined) data.notes = d.notes;
@@ -197,7 +220,7 @@ router.put('/:id', requireAuth, requireRole('ADMIN'), async (req: Request, res: 
     if (d.startTime) data.startTime = combineDateTime(referenceDate, d.startTime);
     if (d.endTime) data.endTime = combineDateTime(referenceDate, d.endTime);
 
-    res.json({ success: true, data: await updateSchedule(req.params.id, data) });
+    res.json({ success: true, data: await updateSchedule(req.params.id, data, meta) });
   } catch (err) {
     handleError(err, res);
   }

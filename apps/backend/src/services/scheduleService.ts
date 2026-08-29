@@ -226,7 +226,11 @@ export async function updateSchedule(
     startDate: Date;
     endDate: Date;
     notes: string;
-  }>
+  }>,
+  // Set when a TENTOR (not admin) makes the change — "Ajukan Perubahan
+  // Jadwal" takes effect immediately (no approval step, same as "Tambah
+  // Privat"), but is logged for admin visibility via the existing Audit Log.
+  meta?: { changedBy: string; reason: string }
 ) {
   const schedule = await prisma.schedule.findUnique({ where: { id } });
   if (!schedule) throw new AppError('Jadwal tidak ditemukan', 404);
@@ -241,6 +245,26 @@ export async function updateSchedule(
   const conflictsBeforeUpdate = await findScheduleConflicts(schedule.tutorId, nextDay, nextStart, nextEnd, id);
   await assertAllowedOverlap(conflictsBeforeUpdate, nextStart);
   const updated = await prisma.schedule.update({ where: { id }, data });
+
+  if (meta) {
+    await logAudit({
+      tableName: 'schedules',
+      recordId: id,
+      action: 'UPDATE',
+      oldValues: {
+        dayOfWeek: schedule.dayOfWeek,
+        startTime: formatScheduleTime(schedule.startTime),
+        endTime: formatScheduleTime(schedule.endTime),
+      },
+      newValues: {
+        dayOfWeek: updated.dayOfWeek,
+        startTime: formatScheduleTime(updated.startTime),
+        endTime: formatScheduleTime(updated.endTime),
+      },
+      changedBy: meta.changedBy,
+      reason: `Tentor mengajukan perubahan jadwal: ${meta.reason}`,
+    });
+  }
 
   let conflicts: ScheduleConflict[] = [];
 
