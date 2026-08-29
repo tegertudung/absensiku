@@ -74,14 +74,26 @@ export async function getAdminDashboardSummary() {
 export async function getTutorDashboardSummary(tutorId: string) {
   const { start, end } = getTodayRangeUTC();
 
-  const [todaySessions, unfinishedSessions, totalCompletedSessions] = await Promise.all([
+  // Quota + schedule.startTime included so Beranda can render the mockup's
+  // "Isi Sesi" quick-action card (progress bar, and a locked/red state once
+  // quota hits zero) without a second round-trip per session.
+  const todaySessionInclude = {
+    class: { select: { name: true, quotaTotal: true, quotaRemaining: true } },
+    student: {
+      select: {
+        name: true,
+        packages: { where: { status: 'ACTIVE' as const }, select: { quotaTotal: true, quotaRemaining: true }, take: 1 },
+      },
+    },
+    subject: { select: { name: true } },
+    schedule: { select: { startTime: true, endTime: true } },
+  };
+
+  const [tutor, todaySessions, unfinishedSessions, totalCompletedSessions] = await Promise.all([
+    prisma.tutor.findUnique({ where: { id: tutorId }, select: { name: true } }),
     prisma.teachingSession.findMany({
       where: { tutorId, sessionDate: { gte: start, lt: end } },
-      include: {
-        class: { select: { name: true } },
-        student: { select: { name: true } },
-        subject: { select: { name: true } },
-      },
+      include: todaySessionInclude,
       orderBy: { sessionDate: 'asc' },
     }),
     prisma.teachingSession.findMany({
@@ -95,5 +107,5 @@ export async function getTutorDashboardSummary(tutorId: string) {
     prisma.teachingSession.count({ where: { tutorId, status: 'COMPLETED' } }),
   ]);
 
-  return { todaySessions, unfinishedSessions, totalCompletedSessions };
+  return { tutorName: tutor?.name ?? null, todaySessions, unfinishedSessions, totalCompletedSessions };
 }

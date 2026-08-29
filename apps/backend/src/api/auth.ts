@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { login, register, AuthError } from '../services/authService';
+import { login, register, changePassword, AuthError } from '../services/authService';
 import { requireAuth } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 
@@ -69,6 +69,26 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
   }
 
   res.json({ success: true, data: user });
+});
+
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Password saat ini wajib diisi'),
+  newPassword: z.string().min(6, 'Password baru minimal 6 karakter'),
+});
+
+// POST /api/auth/change-password — any authenticated role
+router.post('/change-password', requireAuth, async (req: Request, res: Response) => {
+  const parsed = changePasswordSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten().fieldErrors });
+  }
+  try {
+    await changePassword(req.user!.userId, parsed.data.currentPassword, parsed.data.newPassword);
+    res.json({ success: true });
+  } catch (err) {
+    const status = err instanceof AuthError ? err.status : 500;
+    res.status(status).json({ error: 'Change password failed', message: (err as Error).message });
+  }
 });
 
 export default router;

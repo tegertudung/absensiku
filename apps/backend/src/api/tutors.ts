@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { requireAuth, requireRole } from '../middleware/auth';
 import { handleError } from '../utils/errors';
+import { resolveTutorIdForUser } from '../services/sessionService';
 import {
   createTutor,
   listTutors,
@@ -9,9 +10,24 @@ import {
   updateTutor,
   setTutorActive,
   deleteTutor,
+  getOwnTutorProfile,
 } from '../services/tutorService';
 
 const router = Router();
+
+// GET /api/tutors/me — Tentor's own profile + subjects taught (Profil page).
+// Declared before /:id so "me" isn't swallowed by the :id param route.
+router.get('/me', requireAuth, requireRole('TENTOR'), async (req: Request, res: Response) => {
+  try {
+    const tutorId = await resolveTutorIdForUser(req.user!.userId);
+    if (!tutorId) {
+      return res.status(403).json({ error: 'Forbidden', message: 'Akun Anda belum terhubung ke profil tentor' });
+    }
+    res.json({ success: true, data: await getOwnTutorProfile(tutorId) });
+  } catch (err) {
+    handleError(err, res);
+  }
+});
 
 const createSchema = z.object({
   email: z.string().email('Email tidak valid'),

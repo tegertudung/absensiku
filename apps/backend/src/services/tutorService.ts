@@ -56,6 +56,32 @@ export async function listTutors() {
   });
 }
 
+/**
+ * Profil Tentor: own info + "Mata Pelajaran" — derived from distinct subjects
+ * across their active schedules, since there's no direct Tutor<->Subject
+ * assignment table in the schema (subjects flow through Schedule/Class).
+ */
+export async function getOwnTutorProfile(id: string) {
+  const [tutor, scheduleSubjects] = await Promise.all([
+    prisma.tutor.findUnique({
+      where: { id },
+      include: { user: { select: { email: true } } },
+    }),
+    prisma.schedule.findMany({
+      where: { tutorId: id, status: 'ACTIVE', subjectId: { not: null } },
+      select: { subject: { select: { id: true, name: true } } },
+      distinct: ['subjectId'],
+    }),
+  ]);
+  if (!tutor) throw new AppError('Tentor tidak ditemukan', 404);
+
+  const subjects = scheduleSubjects
+    .map((s) => s.subject)
+    .filter((s): s is { id: string; name: string } => Boolean(s));
+
+  return { ...tutor, subjects };
+}
+
 export async function getTutorById(id: string) {
   const tutor = await prisma.tutor.findUnique({
     where: { id },

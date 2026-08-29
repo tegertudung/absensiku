@@ -96,6 +96,22 @@ export async function register(email: string, password: string, role: 'ADMIN' | 
   };
 }
 
+/** Any logged-in role can change their own password, given the current one. */
+export async function changePassword(userId: string, currentPassword: string, newPassword: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new AuthError('Akun tidak ditemukan', 404);
+
+  const isValid = await bcrypt.compare(currentPassword, user.passwordHash);
+  // 400, not 401: this is a validation failure on a value the user typed,
+  // not an invalid/expired token — the frontend's global interceptor treats
+  // every 401 as "log the user out and bounce to /login", which would be a
+  // very confusing way to report a typo'd password.
+  if (!isValid) throw new AuthError('Password saat ini salah', 400);
+
+  const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+}
+
 export function generateToken(payload: JwtPayload): string {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN } as jwt.SignOptions);
 }
