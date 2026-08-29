@@ -9,7 +9,7 @@ const SALT_ROUNDS = 10;
 export interface JwtPayload {
   userId: string;
   email: string;
-  role: 'ADMIN' | 'TENTOR';
+  role: 'ADMIN' | 'TENTOR' | 'PARENT';
 }
 
 export class AuthError extends Error {
@@ -47,7 +47,7 @@ export async function login(email: string, password: string) {
   const token = generateToken({
     userId: user.id,
     email: user.email,
-    role: user.role as 'ADMIN' | 'TENTOR',
+    role: user.role as 'ADMIN' | 'TENTOR' | 'PARENT',
   });
 
   return {

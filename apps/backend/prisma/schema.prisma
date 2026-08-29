@@ -25,6 +25,7 @@ model User {
   updatedAt DateTime  @updatedAt
 
   tutor Tutor?
+  parent Parent?
   pushSubscriptions PushSubscription[]
 
   @@index([email])
@@ -102,8 +103,46 @@ model Student {
   sessions TeachingSession[]
   schedules Schedule[]
   enrollments ClassEnrollment[]
+  parentLinks ParentStudent[]
 
   @@index([status])
+}
+
+// ============================================
+// 3b. PARENTS (Orang Tua)
+// ============================================
+
+model Parent {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  name      String
+  phone     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  children ParentStudent[]
+
+  @@index([userId])
+}
+
+// Join table: one Parent can be linked to multiple Student (siblings all
+// enrolled at Pioneer Class), and — in principle — a Student could have more
+// than one linked Parent account (e.g. both mother and father), so this is a
+// genuine many-to-many, not a simple FK on Student.
+model ParentStudent {
+  id           String   @id @default(uuid())
+  parentId     String
+  studentId    String
+  relationship String? // free text: 'Ayah' | 'Ibu' | 'Wali', etc.
+  createdAt    DateTime @default(now())
+
+  parent  Parent  @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([parentId, studentId])
+  @@index([parentId])
+  @@index([studentId])
 }
 
 // ============================================

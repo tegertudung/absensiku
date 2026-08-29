@@ -36,7 +36,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
  * Restricts a route to specific roles. Must run AFTER requireAuth.
  * Usage: router.get('/admin-only', requireAuth, requireRole('ADMIN'), handler)
  */
-export function requireRole(...roles: Array<'ADMIN' | 'TENTOR'>) {
+export function requireRole(...roles: Array<'ADMIN' | 'TENTOR' | 'PARENT'>) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Unauthorized', message: 'Belum login' });

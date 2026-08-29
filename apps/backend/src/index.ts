@@ -23,6 +23,8 @@ import pushRouter from './api/push';
 import programsRouter from './api/programs';
 import settingsRouter from './api/settings';
 import honorSlipRouter from './api/honorSlip';
+import parentsRouter from './api/parents';
+import parentPortalRouter from './api/parentPortal';
 import { SETTINGS_UPLOAD_ROOT } from './middleware/settingsUpload';
 
 const app = express();
@@ -68,6 +70,8 @@ app.use('/api/push', pushRouter);
 app.use('/api/programs', programsRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/honor', honorSlipRouter);
+app.use('/api/parents', parentsRouter);
+app.use('/api/parent', parentPortalRouter);
 
 // 404 handler
 app.use((req, res) => {
