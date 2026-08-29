@@ -17,6 +17,7 @@ export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [pushState, setPushState] = useState<'unsupported' | 'denied' | 'subscribed' | 'unsubscribed'>('unsupported');
   const [enabling, setEnabling] = useState(false);
+  const [pushError, setPushError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -39,9 +40,22 @@ export default function NotificationBell() {
 
   async function handleEnablePush() {
     setEnabling(true);
+    setPushError(null);
     try {
       const result = await subscribeToPush();
       setPushState(result === 'subscribed' ? 'subscribed' : result === 'denied' ? 'denied' : 'unsupported');
+      if (result !== 'subscribed') {
+        setPushError(
+          result === 'denied'
+            ? 'Izin notifikasi ditolak di browser ini.'
+            : 'Perangkat/browser ini tidak mendukung push notification.'
+        );
+      }
+    } catch (err: any) {
+      // Surfaced in the UI on purpose — on a phone there's no console to check,
+      // so a swallowed error here means the user just sees "Aktifkan" do
+      // nothing forever with no way to tell us what actually broke.
+      setPushError(err?.message || 'Gagal mengaktifkan notifikasi (error tidak diketahui).');
     } finally {
       setEnabling(false);
     }
@@ -97,6 +111,12 @@ export default function NotificationBell() {
                   Notifikasi diblokir di browser ini. Aktifkan lewat pengaturan izin situs untuk menerima notifikasi
                   langsung ke perangkat.
                 </p>
+              </div>
+            )}
+            {pushError && (
+              <div className="px-3 py-2 border-b border-gray-100 bg-red-50">
+                <p className="text-[11px] font-medium text-red-700">Gagal mengaktifkan notifikasi:</p>
+                <p className="text-[11px] text-red-600 break-words">{pushError}</p>
               </div>
             )}
             {notifications.length === 0 ? (
