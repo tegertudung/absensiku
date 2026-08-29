@@ -116,6 +116,8 @@ export async function createSchedule(data: {
   endTime: Date;
   startDate: Date;
   endDate?: Date;
+  mode?: 'ONLINE' | 'OFFLINE';
+  location?: string;
   notes?: string;
 }) {
   const tutor = await prisma.tutor.findUnique({ where: { id: data.tutorId } });
@@ -149,6 +151,11 @@ export async function createSchedule(data: {
       startDate: data.startDate,
       endDate: data.endDate,
       status: 'ACTIVE',
+      mode: data.mode ?? 'OFFLINE',
+      // Location only makes sense for an in-person slot — dropped rather than
+      // stored when mode is ONLINE, so switching modes later can't leave a
+      // stale address behind.
+      location: data.mode === 'ONLINE' ? undefined : data.location,
       notes: data.notes,
     },
   });
@@ -195,8 +202,15 @@ export async function listSchedules(filters: {
     },
     include: {
       tutor: { select: { name: true } },
-      class: { select: { name: true } },
-      student: { select: { name: true } },
+      // Quota included so Tentor Jadwal can show/disable "Mulai Kelas" once a
+      // class or package runs out, same rule as the Beranda dashboard cards.
+      class: { select: { name: true, quotaTotal: true, quotaRemaining: true } },
+      student: {
+        select: {
+          name: true,
+          packages: { where: { status: 'ACTIVE' }, select: { quotaTotal: true, quotaRemaining: true }, take: 1 },
+        },
+      },
       subject: { select: { name: true } },
     },
     orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
@@ -225,6 +239,8 @@ export async function updateSchedule(
     endTime: Date;
     startDate: Date;
     endDate: Date;
+    mode: 'ONLINE' | 'OFFLINE';
+    location: string | null;
     notes: string;
   }>,
   // Set when a TENTOR (not admin) makes the change — "Ajukan Perubahan
@@ -244,6 +260,8 @@ export async function updateSchedule(
   const nextEnd = data.endTime ?? schedule.endTime;
   const conflictsBeforeUpdate = await findScheduleConflicts(schedule.tutorId, nextDay, nextStart, nextEnd, id);
   await assertAllowedOverlap(conflictsBeforeUpdate, nextStart);
+  // Same rule as createSchedule: switching to ONLINE drops any stale address.
+  if (data.mode === 'ONLINE') data.location = null;
   const updated = await prisma.schedule.update({ where: { id }, data });
 
   if (meta) {

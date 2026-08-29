@@ -218,3 +218,38 @@ export function IconChevronRight({ className }: IconProps) {
     </svg>
   );
 }
+
+export function IconBook({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M4 5.5c0-1 .9-1.5 2-1.5h6v15H6c-1.1 0-2 .5-2 1.5v-15Z" />
+      <path d="M20 5.5c0-1-.9-1.5-2-1.5h-6v15h6c1.1 0 2 .5 2 1.5v-15Z" />
+    </svg>
+  );
+}
+
+export function IconVideo({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <rect x="2.5" y="6" width="13" height="12" rx="2" />
+      <path d="M15.5 10.5 21 7v10l-5.5-3.5" />
+    </svg>
+  );
+}
+
+export function IconMapPin({ className }: IconProps) {
+  return (
+    <svg {...base} className={className}>
+      <path d="M12 21s7-6.5 7-11.5A7 7 0 0 0 5 9.5C5 14.5 12 21 12 21Z" />
+      <circle cx="12" cy="9.5" r="2.3" />
+    </svg>
+  );
+}
+
+export function IconStar({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
+      <path d="M12 2.5l2.9 6.3 6.9.7-5.2 4.6 1.5 6.8L12 17.6l-6.1 3.3 1.5-6.8-5.2-4.6 6.9-.7L12 2.5Z" />
+    </svg>
+  );
+}

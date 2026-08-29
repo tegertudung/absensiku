@@ -230,6 +230,8 @@ model Schedule {
   startDate   DateTime
   endDate     DateTime?
   status      String   @default("ACTIVE") // 'ACTIVE' | 'INACTIVE' | 'CANCELLED'
+  mode        String   @default("OFFLINE") // 'ONLINE' | 'OFFLINE' — Tentor Jadwal mockup
+  location    String?  // free-text, e.g. "Cabang Sudirman"; only meaningful when mode=OFFLINE
   notes       String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt

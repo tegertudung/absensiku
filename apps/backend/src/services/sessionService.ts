@@ -412,7 +412,7 @@ export async function listSessions(filters: {
       class: { select: { name: true, quotaTotal: true, quotaRemaining: true } },
       student: { select: { name: true, packages: { where: { status: 'ACTIVE' }, select: { quotaTotal: true, quotaRemaining: true }, take: 1 } } },
       subject: { select: { name: true } },
-      schedule: { select: { startTime: true } },
+      schedule: { select: { startTime: true, endTime: true, mode: true, location: true } },
     },
     orderBy: { sessionDate: 'desc' },
   });

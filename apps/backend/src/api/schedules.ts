@@ -35,6 +35,8 @@ const createSchema = z.object({
   endTime: timeString,
   startDate: dateString,
   endDate: dateString.optional(),
+  mode: z.enum(['ONLINE', 'OFFLINE']).default('OFFLINE'),
+  location: z.string().trim().max(255).optional(),
   notes: z.string().optional(),
 });
 
@@ -78,6 +80,8 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       endTime: combineDateTime(d.startDate, d.endTime),
       startDate: new Date(d.startDate),
       endDate: d.endDate ? new Date(d.endDate) : undefined,
+      mode: d.mode,
+      location: d.location,
       notes: d.notes,
     });
     res.status(201).json({ success: true, data: schedule });
@@ -176,6 +180,8 @@ const updateSchema = z.object({
   startTime: timeString.optional(),
   endTime: timeString.optional(),
   endDate: dateString.optional(),
+  mode: z.enum(['ONLINE', 'OFFLINE']).optional(),
+  location: z.string().trim().max(255).optional(),
   notes: z.string().optional(),
   // Required only when a TENTOR submits this (enforced below, not by the
   // schema, so ADMIN edits don't need to carry a reason).
@@ -214,6 +220,8 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
     const referenceDate = d.startDate ?? new Date().toISOString().split('T')[0];
     const data: Record<string, unknown> = {};
     if (d.notes !== undefined) data.notes = d.notes;
+    if (d.mode !== undefined) data.mode = d.mode;
+    if (d.location !== undefined) data.location = d.location;
     if (d.dayOfWeek !== undefined) data.dayOfWeek = d.dayOfWeek;
     if (d.startDate) data.startDate = new Date(d.startDate);
     if (d.endDate) data.endDate = new Date(d.endDate);

@@ -37,6 +37,8 @@ export default function TentorNewPrivatePage() {
     startDate: todayISODate(),
     startTime: '16:00',
     endTime: '17:30',
+    mode: 'OFFLINE',
+    location: '',
     notes: '',
   });
 
@@ -102,6 +104,8 @@ export default function TentorNewPrivatePage() {
         startDate: form.startDate,
         startTime: form.startTime,
         endTime: form.endTime,
+        mode: form.mode,
+        location: form.mode === 'OFFLINE' && form.location.trim() ? form.location.trim() : undefined,
         notes: form.notes || undefined,
       });
       router.push('/tentor/schedule');
@@ -198,6 +202,43 @@ export default function TentorNewPrivatePage() {
             />
           </div>
         </div>
+
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Mode</label>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setForm({ ...form, mode: 'OFFLINE' })}
+              className={`flex-1 rounded-md border py-2 text-sm font-medium ${
+                form.mode === 'OFFLINE' ? 'border-navy-900 bg-navy-900 text-white' : 'border-gray-300 text-gray-600'
+              }`}
+            >
+              Offline
+            </button>
+            <button
+              type="button"
+              onClick={() => setForm({ ...form, mode: 'ONLINE' })}
+              className={`flex-1 rounded-md border py-2 text-sm font-medium ${
+                form.mode === 'ONLINE' ? 'border-navy-900 bg-navy-900 text-white' : 'border-gray-300 text-gray-600'
+              }`}
+            >
+              Online
+            </button>
+          </div>
+        </div>
+
+        {form.mode === 'OFFLINE' && (
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Lokasi (opsional)</label>
+            <input
+              type="text"
+              value={form.location}
+              onChange={(e) => setForm({ ...form, location: e.target.value })}
+              placeholder="cth. Cabang Sudirman"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+        )}
 
         {checking && <p className="text-xs text-gray-400">Memeriksa jadwal bentrok...</p>}
 

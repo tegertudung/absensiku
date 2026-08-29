@@ -19,6 +19,8 @@ type Schedule = {
   endTime: string;
   startDate: string;
   status: string;
+  mode: string;
+  location: string | null;
   tutor: { name: string };
   class: { name: string; quotaRemaining?: number; quotaTotal?: number } | null;
   student: { name: string } | null;
@@ -82,6 +84,8 @@ export default function AdminSchedulesPage() {
     startTime: "09:00",
     endTime: "10:30",
     startDate: key(new Date()),
+    mode: "OFFLINE",
+    location: "",
   });
   const load = useCallback(async () => {
     setLoading(true);
@@ -184,6 +188,7 @@ export default function AdminSchedulesPage() {
         dayOfWeek: Number(form.dayOfWeek),
         classId: form.sessionType === "REGULAR" ? form.classId : undefined,
         studentId: form.sessionType === "PRIVATE" ? form.studentId : undefined,
+        location: form.mode === "OFFLINE" && form.location.trim() ? form.location.trim() : undefined,
       });
       setOpen(false);
       await load();
@@ -501,6 +506,27 @@ export default function AdminSchedulesPage() {
                   }
                 />
               </Form>
+              <Form label="Mode">
+                <select
+                  value={form.mode}
+                  onChange={(e) => setForm({ ...form, mode: e.target.value })}
+                >
+                  <option value="OFFLINE">Offline</option>
+                  <option value="ONLINE">Online</option>
+                </select>
+              </Form>
+              {form.mode === "OFFLINE" && (
+                <Form label="Lokasi">
+                  <input
+                    type="text"
+                    value={form.location}
+                    onChange={(e) =>
+                      setForm({ ...form, location: e.target.value })
+                    }
+                    placeholder="cth. Cabang Sudirman"
+                  />
+                </Form>
+              )}
             </div>
             <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">
               <button
@@ -588,6 +614,7 @@ function List({
             <th>Program</th>
             <th>Kelas / Siswa</th>
             <th>Mapel</th>
+            <th>Mode</th>
             <th>Status</th>
           </tr>
         </thead>
@@ -608,6 +635,7 @@ function List({
               </td>
               <td>{x.class?.name || x.student?.name || "-"}</td>
               <td>{x.subject?.name || "-"}</td>
+              <td>{x.mode === "ONLINE" ? "Online" : x.location ? `Offline · ${x.location}` : "Offline"}</td>
               <td>
                 <StatusBadge status={x.status} />
               </td>
@@ -654,6 +682,10 @@ function Panel({ row, close }: { row: Schedule; close: () => void }) {
           v={row.class?.name || row.student?.name || "-"}
         />
         <Info l="Mata Pelajaran" v={row.subject?.name || "-"} />
+        <Info
+          l="Mode"
+          v={row.mode === "ONLINE" ? "Online" : row.location ? `Offline – ${row.location}` : "Offline"}
+        />
         {row.class?.quotaRemaining !== undefined && (
           <Info
             l="Sisa Pertemuan"
