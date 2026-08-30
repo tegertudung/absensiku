@@ -2,6 +2,16 @@ import axios from 'axios';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
 
+// Static assets (e.g. /uploads/settings/logo/...) are served from the backend
+// root, not under /api — strip the API suffix to get their origin.
+const API_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, '');
+
+/** Resolve a server-relative asset path (e.g. settings.logoPath) to a full URL. */
+export function assetUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  return `${API_ORIGIN}${path}`;
+}
+
 const api = axios.create({
   baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },

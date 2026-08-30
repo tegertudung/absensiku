@@ -21,3 +21,4 @@ yarn-error.log*
 .cache/
 .parcel-cache/
 *.tsbuildinfo
+apps/backend/uploads/
