@@ -13,6 +13,7 @@ import {
   resolveTutorIdForUser,
   saveSessionDraft,
   completeSessionsBatch,
+  createDirectSession,
 } from '../services/sessionService';
 import { recordAttendance, getAttendanceForSession } from '../services/attendanceService';
 import { lockOverdueSessions } from '../jobs/lockOverdueSessions';
@@ -66,6 +67,43 @@ router.post('/', requireAuth, requireRole('TENTOR', 'ADMIN'), async (req: Reques
   } catch (err) {
     handleError(err, res);
   }
+});
+
+const directSessionSchema = z.object({
+  sessionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal tidak valid'),
+  startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Format jam mulai tidak valid'),
+  endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Format jam selesai tidak valid'),
+  sessionType: z.enum(['REGULAR', 'PRIVATE']),
+  classId: z.string().uuid().optional(),
+  studentId: z.string().uuid().optional(),
+  subjectId: z.string().uuid(),
+  mode: z.enum(['OFFLINE', 'ONLINE']),
+  location: z.string().max(255).optional(),
+  material: z.string().trim().min(1, 'Materi hari ini wajib diisi.'),
+  progressNotes: z.string().trim().optional(),
+  score: z.number().min(0).max(100).nullable().optional(),
+}).superRefine((data, ctx) => {
+  if (data.sessionType === 'REGULAR' && !data.classId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['classId'], message: 'Kelas wajib dipilih.' });
+  if (data.sessionType === 'PRIVATE' && !data.studentId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['studentId'], message: 'Siswa wajib dipilih.' });
+  if (data.sessionType === 'PRIVATE' && !data.progressNotes) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['progressNotes'], message: 'Catatan perkembangan wajib diisi.' });
+});
+
+// A completed manual session has no Schedule by design; the transaction in the
+// service creates it and consumes quota/honor using the same finalizer as a scheduled session.
+router.post('/direct', requireAuth, requireRole('TENTOR'), async (req: Request, res: Response) => {
+  const parsed = directSessionSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten().fieldErrors });
+  try {
+    const tutorId = await resolveTutorIdForUser(req.user!.userId);
+    if (!tutorId) return res.status(403).json({ error: 'Forbidden', message: 'Akun Anda belum terhubung ke profil tentor' });
+    const session = await createDirectSession({
+      ...parsed.data,
+      tutorId,
+      userId: req.user!.userId,
+      sessionDate: new Date(`${parsed.data.sessionDate}T00:00:00`),
+    });
+    res.status(201).json({ success: true, data: session, message: 'Sesi mengajar berhasil dicatat' });
+  } catch (err) { handleError(err, res); }
 });
 
 // ============================================

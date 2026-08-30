@@ -19,6 +19,7 @@ export default function TentorLayout({ children }: { children: React.ReactNode }
   const router = useRouter();
   const logout = useAuthStore((s) => s.logout);
   const user = useAuthStore((s) => s.user);
+  const isPrivateScheduleForm = pathname === '/tentor/private/new';
 
   // Split nav items around the center FAB slot (Beranda, Jadwal | + | Rekap, Profil)
   const left = NAV_ITEMS.slice(0, 2);
@@ -27,7 +28,7 @@ export default function TentorLayout({ children }: { children: React.ReactNode }
   return (
     <RequireAuth role="TENTOR">
       <div className="min-h-screen bg-canvas flex flex-col">
-        <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between sticky top-0 z-10">
+        {!isPrivateScheduleForm && <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between sticky top-0 z-10">
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded bg-navy-900 flex items-center justify-center text-white text-xs font-bold">
               P
@@ -46,11 +47,11 @@ export default function TentorLayout({ children }: { children: React.ReactNode }
               Keluar
             </button>
           </div>
-        </header>
+        </header>}
 
-        <main className="flex-1 px-4 py-4 pb-24">{children}</main>
+        <main className={`flex-1 px-4 py-4 ${isPrivateScheduleForm ? '' : 'pb-24'}`}>{children}</main>
 
-        <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex items-stretch z-20">
+        {!isPrivateScheduleForm && <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex items-stretch z-20">
           {left.map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href;
@@ -68,11 +69,11 @@ export default function TentorLayout({ children }: { children: React.ReactNode }
             );
           })}
 
-          {/* Floating "+" FAB — quick-add private session, centered in the bottom nav */}
+          {/* Floating "+" FAB — record a completed manual teaching session. */}
           <div className="w-16 flex items-center justify-center relative">
             <Link
-              href="/tentor/private/new"
-              aria-label="Tambah Privat"
+              href="/tentor/sessions/direct"
+              aria-label="Catat Sesi Mengajar"
               className="absolute -top-6 w-14 h-14 rounded-full bg-navy-900 text-white flex items-center justify-center shadow-lg hover:bg-navy-800"
             >
               <IconPlus className="w-6 h-6" />
@@ -95,7 +96,7 @@ export default function TentorLayout({ children }: { children: React.ReactNode }
               </Link>
             );
           })}
-        </nav>
+        </nav>}
       </div>
     </RequireAuth>
   );

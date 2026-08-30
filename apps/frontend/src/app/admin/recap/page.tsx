@@ -25,8 +25,9 @@ interface SessionRow {
 
 function formatHariJam(session: SessionRow): string {
   const hari = DAY_NAMES[new Date(session.sessionDate).getUTCDay()];
-  if (!session.schedule?.startTime) return hari;
-  const t = new Date(session.schedule.startTime);
+  const startTime = session.startTime || session.schedule?.startTime;
+  if (!startTime) return hari;
+  const t = new Date(startTime);
   const jam = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
   return `${hari}, ${jam}`;
 }

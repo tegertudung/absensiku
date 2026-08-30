@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import api from '@/lib/api';
 import { StatusBadge, TypeBadge } from '@/components/StatusBadge';
@@ -28,6 +28,8 @@ interface SessionItem {
   class?: (Quota & { name: string }) | null;
   student?: { name: string; packages?: Quota[] } | null;
   subject?: { name: string } | null;
+  startTime?: string | null;
+  endTime?: string | null;
   schedule?: { startTime: string; endTime: string } | null;
 }
 
@@ -39,7 +41,20 @@ interface TentorDashboard {
 }
 
 const CANCELLED_STATUSES = new Set(['CANCELLED', 'CANCELLED_NOT_COUNTED']);
-const DAY_LABELS = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum'];
+const DAY_LABELS = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+
+function isoDate(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(date: Date, days: number) {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+}
 
 function formatTime(iso: string) {
   const d = new Date(iso);
@@ -51,8 +66,10 @@ function sessionQuota(s: SessionItem): Quota | null {
 }
 
 function sessionMinutes(s: SessionItem): number | null {
-  if (!s.schedule) return null;
-  const diff = new Date(s.schedule.endTime).getTime() - new Date(s.schedule.startTime).getTime();
+  const start = s.startTime || s.schedule?.startTime;
+  const end = s.endTime || s.schedule?.endTime;
+  if (!start || !end) return null;
+  const diff = new Date(end).getTime() - new Date(start).getTime();
   return Math.max(0, Math.round(diff / 60000));
 }
 
@@ -71,15 +88,36 @@ function startOfWeek(date: Date) {
   return d;
 }
 
+function weekMonthLabel(monday: Date) {
+  const friday = addDays(monday, 4);
+  const formatter = new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' });
+  const startLabel = formatter.format(monday);
+  const endLabel = formatter.format(friday);
+  return startLabel === endLabel ? startLabel : `${startLabel} – ${endLabel}`;
+}
+
 function sessionTitle(s: SessionItem) {
   return s.sessionType === 'REGULAR' ? s.class?.name : s.student?.name;
+}
+
+function monthRange(date: Date) {
+  return {
+    start: isoDate(new Date(date.getFullYear(), date.getMonth() - 1, 1)),
+    end: isoDate(new Date(date.getFullYear(), date.getMonth() + 2, 0)),
+  };
 }
 
 export default function TentorHomePage() {
   const [data, setData] = useState<TentorDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [weekOffset, setWeekOffset] = useState(0);
+  const [selectedDate, setSelectedDate] = useState(() => new Date());
+  const [rangeSessions, setRangeSessions] = useState<SessionItem[]>([]);
+  const [scheduleLoading, setScheduleLoading] = useState(true);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date());
+  const selectedCardRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     api
@@ -89,32 +127,55 @@ export default function TentorHomePage() {
       .finally(() => setLoading(false));
   }, []);
 
+  const loadSelectedSchedule = useCallback(async () => {
+    const range = monthRange(calendarOpen ? calendarMonth : selectedDate);
+    setScheduleLoading(true);
+    setScheduleError(null);
+    try {
+      const res = await api.get('/sessions', { params: { startDate: range.start, endDate: range.end } });
+      setRangeSessions(res.data.data);
+    } catch {
+      setScheduleError('Gagal memuat jadwal.');
+    } finally {
+      setScheduleLoading(false);
+    }
+  }, [calendarMonth, calendarOpen, selectedDate]);
+
+  useEffect(() => {
+    loadSelectedSchedule();
+  }, [loadSelectedSchedule]);
+
+  useEffect(() => {
+    selectedCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+  }, [selectedDate]);
+
   if (loading) return <p className="text-sm text-gray-400">Memuat...</p>;
   if (error || !data) return <p className="text-sm text-red-500">{error ?? 'Data tidak tersedia.'}</p>;
 
   const now = new Date();
-  const monday = startOfWeek(now);
-  monday.setDate(monday.getDate() + weekOffset * 7);
-  const weekDays = Array.from({ length: 5 }, (_, i) => {
-    const d = new Date(monday);
-    d.setDate(d.getDate() + i);
-    return d;
-  });
-  const monthLabel = monday.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+  const stripDays = Array.from({ length: 15 }, (_, i) => addDays(selectedDate, i - 4));
+  const monthLabel = selectedDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+  const selectedDateKey = isoDate(selectedDate);
+  const isSelectedToday = selectedDateKey === isoDate(now);
+  const sessionsByDate = new Set(rangeSessions.map((session) => isoDate(new Date(session.sessionDate))));
+  const selectedSessions = rangeSessions.filter((session) => isoDate(new Date(session.sessionDate)) === selectedDateKey);
 
   const activeToday = data.todaySessions.filter((s) => !CANCELLED_STATUSES.has(s.status));
   const totalMinutesToday = activeToday.reduce((sum, s) => sum + (sessionMinutes(s) ?? 0), 0);
 
-  const sortedToday = [...data.todaySessions].sort((a, b) => {
-    const ta = a.schedule ? new Date(a.schedule.startTime).getTime() : new Date(a.sessionDate).getTime();
-    const tb = b.schedule ? new Date(b.schedule.startTime).getTime() : new Date(b.sessionDate).getTime();
+  const sortedSessions = [...selectedSessions].sort((a, b) => {
+    const ta = a.startTime ? new Date(a.startTime).getTime() : a.schedule ? new Date(a.schedule.startTime).getTime() : new Date(a.sessionDate).getTime();
+    const tb = b.startTime ? new Date(b.startTime).getTime() : b.schedule ? new Date(b.schedule.startTime).getTime() : new Date(b.sessionDate).getTime();
     return ta - tb;
   });
   const isUpcoming = (s: SessionItem) =>
-    !CANCELLED_STATUSES.has(s.status) && s.schedule != null && new Date(s.schedule.startTime) > now;
-  const upcomingSessions = sortedToday.filter(isUpcoming);
-  const pastSessions = sortedToday.filter((s) => !isUpcoming(s));
-  const nextSession = upcomingSessions[0] ?? null;
+    isSelectedToday && !CANCELLED_STATUSES.has(s.status) && s.schedule != null && new Date(s.schedule.startTime) > now;
+  const upcomingSessions = sortedSessions.filter(isUpcoming);
+  const pastSessions = sortedSessions.filter((s) => !isUpcoming(s));
+  const nextSession = isSelectedToday ? upcomingSessions[0] ?? null : null;
+  const scheduleTitle = isSelectedToday
+    ? 'Jadwal Hari Ini'
+    : `Jadwal ${selectedDate.toLocaleDateString('id-ID', { day: 'numeric', month: 'long' })}`;
 
   return (
     <div className="space-y-6">
@@ -148,41 +209,31 @@ export default function TentorHomePage() {
         </div>
       </div>
 
-      {/* Week strip */}
+      {/* Navigasi tanggal */}
       <div>
-        <div className="mb-3 flex items-center justify-between">
-          <p className="text-sm font-medium capitalize text-gray-900">{monthLabel}</p>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setWeekOffset((o) => o - 1)}
-              aria-label="Minggu sebelumnya"
-              className="flex h-7 w-7 items-center justify-center rounded-full border border-gray-200 text-gray-500 hover:bg-gray-50"
-            >
-              <IconChevronLeft className="h-4 w-4" />
-            </button>
-            <button
-              onClick={() => setWeekOffset((o) => o + 1)}
-              aria-label="Minggu berikutnya"
-              className="flex h-7 w-7 items-center justify-center rounded-full border border-gray-200 text-gray-500 hover:bg-gray-50"
-            >
-              <IconChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-        <div className="grid grid-cols-5 gap-2">
-          {weekDays.map((d, i) => {
-            const isToday = d.toDateString() === now.toDateString();
+        <button type="button" onClick={() => { setCalendarMonth(selectedDate); setCalendarOpen(true); }} className="mb-3 flex min-h-10 items-center gap-1 text-sm font-semibold capitalize text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-navy-700">
+          {monthLabel}<IconChevronRight className="h-4 w-4 rotate-90" />
+        </button>
+        <div className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {stripDays.map((d) => {
+            const isSelected = isoDate(d) === selectedDateKey;
+            const hasSchedule = sessionsByDate.has(isoDate(d));
             return (
-              <div
-                key={i}
-                className={`flex flex-col items-center gap-1.5 rounded-xl py-2.5 ${
-                  isToday ? 'bg-navy-900 text-white' : 'border border-gray-100 bg-white text-gray-500'
+              <button
+                key={isoDate(d)}
+                type="button"
+                onClick={() => setSelectedDate(d)}
+                aria-pressed={isSelected}
+                ref={isSelected ? selectedCardRef : null}
+                aria-label={`Pilih ${d.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long' })}`}
+                className={`flex h-[104px] w-[58px] shrink-0 snap-center flex-col items-center justify-center gap-1.5 rounded-xl border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-navy-700 focus-visible:ring-offset-2 ${
+                  isSelected ? 'border-navy-900 bg-navy-900 text-white ring-2 ring-navy-100' : 'border-gray-100 bg-white text-gray-600 hover:border-navy-200 hover:bg-navy-50'
                 }`}
               >
-                <span className="text-[11px]">{DAY_LABELS[i]}</span>
+                <span className="text-[11px]">{DAY_LABELS[d.getDay()]}</span>
                 <span className="text-sm font-semibold">{d.getDate()}</span>
-                {isToday && <span className="h-1 w-1 rounded-full bg-white/80" />}
-              </div>
+                {hasSchedule ? <span className={`h-1.5 w-1.5 rounded-full ${isSelected ? 'bg-white' : 'bg-blue-600'}`} aria-label="Ada jadwal" /> : <span className="h-1.5 w-1.5" aria-hidden="true" />}
+              </button>
             );
           })}
         </div>
@@ -199,17 +250,29 @@ export default function TentorHomePage() {
         </div>
       )}
 
-      {/* Jadwal Hari Ini */}
+      {/* Jadwal tanggal terpilih */}
       <div>
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-900">Jadwal Hari Ini</h2>
+          <h2 className="text-sm font-semibold text-gray-900">{scheduleTitle}</h2>
           <Link href="/tentor/schedule" className="text-xs font-medium text-navy-700 hover:underline">
             Lihat Semua
           </Link>
         </div>
-        {data.todaySessions.length === 0 ? (
+        {scheduleLoading ? (
+          <div className="space-y-2" aria-live="polite" aria-label="Memuat jadwal">
+            <div className="h-20 animate-pulse rounded-xl border border-gray-100 bg-gray-50" />
+            <div className="h-20 animate-pulse rounded-xl border border-gray-100 bg-gray-50" />
+          </div>
+        ) : scheduleError ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-4 text-center">
+            <p className="text-sm text-red-600">{scheduleError}</p>
+            <button onClick={loadSelectedSchedule} className="mt-2 text-xs font-medium text-navy-700 hover:underline">
+              Coba Lagi
+            </button>
+          </div>
+        ) : selectedSessions.length === 0 ? (
           <div className="rounded-xl border border-dashed border-gray-200 bg-white px-4 py-6 text-center">
-            <p className="text-sm text-gray-400">Tidak ada jadwal mengajar hari ini.</p>
+            <p className="text-sm text-gray-400">Tidak ada jadwal pada tanggal ini.</p>
           </div>
         ) : (
           <div className="space-y-2">
@@ -251,17 +314,32 @@ export default function TentorHomePage() {
         </div>
       )}
 
-      <div className="flex items-center justify-between rounded-2xl border border-gray-200 bg-navy-900 px-4 py-3">
-        <span className="text-xs text-navy-200">Total sesi selesai</span>
-        <span className="text-xl font-semibold text-white">{data.totalCompletedSessions}</span>
-      </div>
+      {calendarOpen && (
+        <CalendarSheet
+          month={calendarMonth}
+          setMonth={setCalendarMonth}
+          selectedDate={selectedDateKey}
+          scheduleDates={sessionsByDate}
+          onClose={() => setCalendarOpen(false)}
+          onSelect={(date) => { setSelectedDate(date); setCalendarOpen(false); }}
+        />
+      )}
+    </div>
+  );
+}
 
-      <Link
-        href="/tentor/private/new"
-        className="block rounded-xl border border-navy-200 py-2.5 text-center text-sm font-medium text-navy-900"
-      >
-        + Tambah Jadwal Privat
-      </Link>
+function CalendarSheet({ month, setMonth, selectedDate, scheduleDates, onClose, onSelect }: { month: Date; setMonth: (date: Date) => void; selectedDate: string; scheduleDates: Set<string>; onClose: () => void; onSelect: (date: Date) => void }) {
+  const first = new Date(month.getFullYear(), month.getMonth(), 1);
+  const start = addDays(first, -((first.getDay() + 6) % 7));
+  const days = Array.from({ length: 42 }, (_, index) => addDays(start, index));
+  return (
+    <div className="fixed inset-0 z-30 flex items-end bg-slate-950/40" role="dialog" aria-modal="true" aria-label="Pilih Tanggal">
+      <div className="w-full rounded-t-3xl bg-white px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 shadow-2xl">
+        <div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-gray-200" />
+        <div className="mb-4 flex items-center justify-between"><h2 className="text-base font-semibold text-navy-900">Pilih Tanggal</h2><button onClick={onClose} className="text-sm font-medium text-gray-500">Tutup</button></div>
+        <div className="mb-3 flex items-center justify-between"><button onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} aria-label="Bulan sebelumnya" className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-gray-100"><IconChevronLeft className="h-5 w-5" /></button><p className="text-sm font-semibold capitalize text-navy-900">{month.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}</p><button onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} aria-label="Bulan berikutnya" className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-gray-100"><IconChevronRight className="h-5 w-5" /></button></div>
+        <div className="grid grid-cols-7 text-center text-[11px] text-gray-500">{['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'].map((day) => <span key={day} className="py-2">{day}</span>)}{days.map((day) => { const key = isoDate(day); const selected = key === selectedDate; const currentMonth = day.getMonth() === month.getMonth(); const hasSchedule = scheduleDates.has(key); return <button key={key} type="button" onClick={() => onSelect(day)} className={`mx-auto flex h-10 w-10 flex-col items-center justify-center rounded-full text-sm font-medium ${selected ? 'bg-blue-600 text-white' : currentMonth ? 'text-navy-900 hover:bg-navy-50' : 'text-gray-300'}`}><span>{day.getDate()}</span>{hasSchedule && <span className={`h-1 w-1 rounded-full ${selected ? 'bg-white' : 'bg-blue-600'}`} />}</button>; })}</div>
+      </div>
     </div>
   );
 }
@@ -277,7 +355,7 @@ function NextSessionCard({ session: s }: { session: SessionItem }) {
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <TypeBadge type={s.sessionType} />
-          <StatusBadge status={s.status} />
+          <span className="flex items-center gap-1"><StatusBadge status={s.status} />{s.status === 'COMPLETED' && <IconChevronRight className="h-4 w-4 text-gray-400" />}</span>
         </div>
         {s.schedule && (
           <span className="text-xs font-medium text-gray-500">
@@ -353,6 +431,9 @@ function SessionRow({ session: s }: { session: SessionItem }) {
     </div>
   );
 
+  if (s.status === 'COMPLETED') {
+    return <Link href={`/tentor/sessions/${s.id}`} aria-label={`Lihat detail sesi ${s.subject?.name || sessionTitle(s) || ''}`} className="block cursor-pointer transition active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-navy-700 focus-visible:ring-offset-2">{content}</Link>;
+  }
   if (!canFillNow || isEmpty) return content;
   return (
     <Link href={`/tentor/sessions/${s.id}`} className="block">

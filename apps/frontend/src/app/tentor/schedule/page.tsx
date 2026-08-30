@@ -12,6 +12,8 @@ import {
   IconStudent,
   IconWarning,
   IconCheckCircle,
+  IconSchedule,
+  IconPlus,
 } from '@/components/icons';
 
 interface Quota {
@@ -244,6 +246,8 @@ export default function TentorSchedulePage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState('');
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date());
 
   const rangeStartKey = useMemo(
     () => isoDate(view === 'DAY' ? anchorDate : startOfWeek(anchorDate)),
@@ -275,6 +279,7 @@ export default function TentorSchedulePage() {
   }, [load]);
 
   const dayAgenda = useMemo(() => buildAgenda(anchorDate, schedules, sessions), [anchorDate, schedules, sessions]);
+  const stripDays = useMemo(() => Array.from({ length: 11 }, (_, index) => addDays(anchorDate, index - 3)), [anchorDate]);
 
   async function startSession(scheduleId: string, dateKey: string) {
     setActionError(null);
@@ -324,6 +329,7 @@ export default function TentorSchedulePage() {
 
   return (
     <div className="space-y-4">
+      <h1 className="text-2xl font-semibold tracking-tight text-navy-900">Jadwal Saya</h1>
       {actionError && (
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{actionError}</p>
       )}
@@ -349,27 +355,18 @@ export default function TentorSchedulePage() {
 
       {view === 'DAY' ? (
         <>
-          <div className="flex items-center justify-between">
-            <button
-              onClick={() => setAnchorDate((d) => addDays(d, -1))}
-              aria-label="Hari sebelumnya"
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-500 hover:bg-gray-50"
-            >
-              <IconChevronLeft className="h-4 w-4" />
+          <div>
+            <button type="button" onClick={() => { setCalendarMonth(anchorDate); setCalendarOpen(true); }} className="mx-auto flex min-h-10 items-center gap-1 text-sm font-semibold capitalize text-navy-900">
+              {anchorDate.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}<IconChevronRight className="h-4 w-4 rotate-90" />
             </button>
-            <div className="text-center">
-              <p className="text-xs font-medium text-navy-700">{DAY_NAMES[anchorDate.getDay()]}</p>
-              <p className="text-sm font-semibold text-gray-900">
-                {anchorDate.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}
-              </p>
+            <div className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {stripDays.map((day) => {
+                const selected = isoDate(day) === rangeStartKey;
+                const hasSchedule = buildAgenda(day, schedules, sessions).length > 0;
+                return <button key={isoDate(day)} onClick={() => setAnchorDate(day)} aria-pressed={selected} className={`flex h-[92px] w-[56px] shrink-0 snap-center flex-col items-center justify-center gap-1 rounded-xl border text-sm ${selected ? 'border-navy-900 bg-navy-900 text-white' : 'border-gray-100 bg-white text-gray-700'}`}><span className="text-[11px]">{DAY_NAMES[day.getDay()].slice(0, 3)}</span><span className="font-semibold">{day.getDate()}</span>{hasSchedule ? <span className={`h-1.5 w-1.5 rounded-full ${selected ? 'bg-white' : 'bg-blue-600'}`} /> : <span className="h-1.5 w-1.5" />}</button>;
+              })}
             </div>
-            <button
-              onClick={() => setAnchorDate((d) => addDays(d, 1))}
-              aria-label="Hari berikutnya"
-              className="flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 text-gray-500 hover:bg-gray-50"
-            >
-              <IconChevronRight className="h-4 w-4" />
-            </button>
+            <div className="mt-4"><p className="text-base font-semibold text-navy-900">{DAY_NAMES[anchorDate.getDay()]}, {anchorDate.toLocaleDateString('id-ID', { day: 'numeric', month: 'long' })}</p><p className="mt-0.5 text-xs text-gray-500">{dayAgenda.length === 0 ? 'Tidak ada sesi' : `${dayAgenda.length} sesi`}</p></div>
           </div>
 
           {loading ? (
@@ -440,8 +437,17 @@ export default function TentorSchedulePage() {
           </div>
         </div>
       )}
+      <Link href="/tentor/private/new" aria-label="Tambah Jadwal Privat" className="fixed bottom-20 right-4 z-30 flex h-11 items-center gap-2 rounded-xl bg-navy-900 px-4 text-sm font-semibold text-white shadow-md transition duration-150 hover:bg-navy-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-navy-700 focus-visible:ring-offset-2 active:scale-[0.97] active:shadow-sm"><IconPlus className="h-4 w-4" />Privat</Link>
+      {calendarOpen && <ScheduleCalendarSheet month={calendarMonth} setMonth={setCalendarMonth} selectedDate={rangeStartKey} schedules={schedules} sessions={sessions} onClose={() => setCalendarOpen(false)} onSelect={(date) => { setAnchorDate(date); setCalendarOpen(false); }} />}
     </div>
   );
+}
+
+function ScheduleCalendarSheet({ month, setMonth, selectedDate, schedules, sessions, onClose, onSelect }: { month: Date; setMonth: (date: Date) => void; selectedDate: string; schedules: ScheduleItem[]; sessions: SessionItem[]; onClose: () => void; onSelect: (date: Date) => void }) {
+  const first = new Date(month.getFullYear(), month.getMonth(), 1);
+  const start = addDays(first, -((first.getDay() + 6) % 7));
+  const days = Array.from({ length: 42 }, (_, index) => addDays(start, index));
+  return <div className="fixed inset-0 z-40 flex items-end bg-slate-950/40" role="dialog" aria-modal="true" aria-label="Pilih Tanggal"><div className="w-full rounded-t-3xl bg-white px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3"><div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-gray-200" /><div className="mb-4 flex items-center justify-between"><h2 className="text-base font-semibold text-navy-900">Pilih Tanggal</h2><button onClick={onClose} className="text-sm text-gray-500">Tutup</button></div><div className="mb-3 flex items-center justify-between"><button onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="flex h-10 w-10 items-center justify-center"><IconChevronLeft className="h-5 w-5" /></button><p className="text-sm font-semibold capitalize">{month.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}</p><button onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="flex h-10 w-10 items-center justify-center"><IconChevronRight className="h-5 w-5" /></button></div><div className="grid grid-cols-7 text-center text-[11px] text-gray-500">{['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'].map((day) => <span key={day} className="py-2">{day}</span>)}{days.map((day) => { const key = isoDate(day); const selected = key === selectedDate; const hasSchedule = buildAgenda(day, schedules, sessions).length > 0; return <button key={key} onClick={() => onSelect(day)} className={`mx-auto flex h-10 w-10 flex-col items-center justify-center rounded-full text-sm ${selected ? 'bg-blue-600 text-white' : day.getMonth() === month.getMonth() ? 'text-navy-900' : 'text-gray-300'}`}><span>{day.getDate()}</span>{hasSchedule && <span className={`h-1 w-1 rounded-full ${selected ? 'bg-white' : 'bg-blue-600'}`} />}</button>; })}</div></div></div>;
 }
 
 function WeekAgenda({
@@ -626,6 +632,12 @@ function AgendaCard({
               className="mt-2 block text-center text-[11px] font-medium text-navy-700 hover:underline"
             >
               Ajukan Perubahan Jadwal
+            </Link>
+          )}
+
+          {item.status === 'COMPLETED' && item.sessionId && (
+            <Link href={`/tentor/sessions/${item.sessionId}`} aria-label={`Lihat detail sesi ${item.title}`} className="mt-3 flex items-center justify-between rounded-xl bg-green-50 px-3 py-2.5 text-sm font-medium text-green-700 transition hover:bg-green-100">
+              <span className="flex items-center gap-1.5"><IconCheckCircle className="h-4 w-4" />Selesai</span><IconChevronRight className="h-4 w-4" />
             </Link>
           )}
 

@@ -2,6 +2,23 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+  .control {
+    @apply min-h-12 w-full rounded-xl border border-gray-200 bg-white px-3 py-3 text-sm text-gray-900 outline-none transition focus:border-navy-700 focus:ring-2 focus:ring-navy-100;
+  }
+
+  /* The teaching-session CTA must remain in document flow: on short mobile
+     viewports the bottom navigation otherwise can cover its fixed container. */
+  main:has(input[type='time']) > div > div.fixed.inset-x-0 {
+    position: static;
+    margin-top: 0.5rem;
+    padding: 0.5rem 0 0;
+    border-top: 0;
+    background: transparent;
+    backdrop-filter: none;
+  }
+}
+
 * {
   box-sizing: border-box;
   padding: 0;
