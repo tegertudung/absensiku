@@ -20,7 +20,9 @@ export async function buildStudentReport(studentId: string) {
       take: 50,
     }),
     prisma.attendanceRecord.findMany({
-      where: { studentId },
+      // Filtered to COMPLETED sessions here, not after fetching — see the
+      // matching note in parentPortalService.getChildProgress.
+      where: { studentId, session: { status: 'COMPLETED' } },
       include: {
         session: {
           include: {
@@ -73,16 +75,14 @@ export async function buildStudentReport(studentId: string) {
       progressNotes: s.progressNotes,
       score: s.score,
     })),
-    regularAttendance: attendanceRecords
-      .filter((a) => a.session.status === 'COMPLETED')
-      .map((a) => ({
-        sessionDate: a.session.sessionDate,
-        className: a.session.class?.name ?? null,
-        subjectName: a.session.subject?.name ?? null,
-        tutorName: a.session.tutor.name,
-        material: a.session.material,
-        attendanceStatus: a.status,
-      })),
+    regularAttendance: attendanceRecords.map((a) => ({
+      sessionDate: a.session.sessionDate,
+      className: a.session.class?.name ?? null,
+      subjectName: a.session.subject?.name ?? null,
+      tutorName: a.session.tutor.name,
+      material: a.session.material,
+      attendanceStatus: a.status,
+    })),
   };
 }
 

@@ -78,7 +78,10 @@ export async function getChildProgress(parentId: string, studentId: string) {
       take: 50,
     }),
     prisma.attendanceRecord.findMany({
-      where: { studentId },
+      // Filtered to COMPLETED sessions here (not after fetching) — doing it
+      // in JS after `take: 50` could silently drop real completed records
+      // behind a recent run of SCHEDULED/IN_PROGRESS/PENDING_ADMIN ones.
+      where: { studentId, session: { status: 'COMPLETED' } },
       include: {
         session: {
           include: {
@@ -103,16 +106,14 @@ export async function getChildProgress(parentId: string, studentId: string) {
       progressNotes: s.progressNotes,
       score: s.score,
     })),
-    regularAttendance: attendanceRecords
-      .filter((a) => a.session.status === 'COMPLETED')
-      .map((a) => ({
-        id: a.id,
-        sessionDate: a.session.sessionDate,
-        className: a.session.class?.name ?? null,
-        subjectName: a.session.subject?.name ?? null,
-        tutorName: a.session.tutor.name,
-        material: a.session.material,
-        attendanceStatus: a.status,
-      })),
+    regularAttendance: attendanceRecords.map((a) => ({
+      id: a.id,
+      sessionDate: a.session.sessionDate,
+      className: a.session.class?.name ?? null,
+      subjectName: a.session.subject?.name ?? null,
+      tutorName: a.session.tutor.name,
+      material: a.session.material,
+      attendanceStatus: a.status,
+    })),
   };
 }
