@@ -385,7 +385,7 @@ export default function TentorSchedulePage() {
                   key={item.key}
                   item={item}
                   isToday={rangeStartKey === todayISODate()}
-                  busy={busyId === item.sessionId || busyId === item.scheduleId}
+                  busy={busyId !== null && (busyId === item.sessionId || busyId === item.scheduleId)}
                   onStart={() => startSession(item.scheduleId, rangeStartKey)}
                   onComplete={() => item.sessionId && completeSession(item.sessionId)}
                   onCancelRequest={() => item.sessionId && setCancelTarget(item.sessionId)}
@@ -518,7 +518,7 @@ function WeekAgenda({
                         key={item.key}
                         item={item}
                         isToday={isToday}
-                        busy={busyId === item.sessionId || busyId === item.scheduleId}
+                        busy={busyId !== null && (busyId === item.sessionId || busyId === item.scheduleId)}
                         onStart={() => onStart(item.scheduleId, dateKey)}
                         onComplete={() => item.sessionId && onComplete(item.sessionId)}
                         onCancelRequest={() => item.sessionId && onCancelRequest(item.sessionId)}
@@ -637,6 +637,14 @@ function AgendaCard({
               >
                 Isi Catatan Sesi
               </Link>
+              {item.sessionType === 'REGULAR' && (
+                <Link
+                  href={`/tentor/sessions/${item.sessionId}/attendance`}
+                  className="block rounded-xl border border-navy-200 py-2.5 text-center text-sm font-medium text-navy-900 hover:bg-navy-50"
+                >
+                  Isi Absensi Siswa
+                </Link>
+              )}
               <div className="flex gap-2">
                 <button
                   onClick={onComplete}

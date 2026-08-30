@@ -190,7 +190,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               <p className="text-xs text-gray-400">Admin</p>
               <p className="truncate text-sm font-medium text-gray-800">{pageContext}</p>
             </div>
-            <button aria-label="Notifikasi" className="relative rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-800">
+            <button
+              onClick={() => router.push('/admin/validations')}
+              aria-label="Notifikasi — validasi menunggu tindakan"
+              className="relative rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+            >
               <IconBell className="w-5 h-5" />
               {pendingCount > 0 && (
                 <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500" />
