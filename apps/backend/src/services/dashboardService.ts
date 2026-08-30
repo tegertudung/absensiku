@@ -43,15 +43,28 @@ export async function getAdminDashboardSummary() {
     }),
     prisma.tutor.count({ where: { status: 'ACTIVE' } }),
     prisma.student.count({ where: { status: 'ACTIVE' } }),
+    // Sorted in JS below, not via `orderBy` on the `schedule` relation — Neon
+    // production hit a Postgres error ("WITHIN GROUP is required for
+    // ordered-set aggregate mode") on exactly this relation-orderBy shape
+    // that never reproduced locally, so it's avoided outright rather than
+    // chased further. Today's row count is small; sorting client-side after
+    // fetch is cheap and sidesteps the whole class of risk.
     prisma.teachingSession.findMany({
       where: { sessionDate: { gte: start, lt: end } },
       include: { tutor: { select: { name: true } }, class: { select: { name: true } }, student: { select: { name: true } }, subject: { select: { name: true } }, schedule: { select: { startTime: true } } },
-      orderBy: [{ schedule: { startTime: 'asc' } }, { createdAt: 'asc' }],
-      take: 12,
+      orderBy: { createdAt: 'asc' },
     }),
     prisma.teachingSession.findMany({ where: { status: 'COMPLETED', sessionDate: { gte: monthStart, lt: monthEnd }, honorRateSnapshot: { not: null } }, select: { honorRateSnapshot: true } }),
     prisma.class.findMany({ where: { status: 'ACTIVE', quotaRemaining: { lte: threshold } }, select: { id: true, name: true, quotaRemaining: true, quotaTotal: true }, orderBy: { quotaRemaining: 'asc' }, take: 8 }),
   ]);
+
+  const sortedTodaySessions = [...todaySessions]
+    .sort((a, b) => {
+      const ta = a.schedule ? new Date(a.schedule.startTime).getTime() : new Date(a.createdAt).getTime();
+      const tb = b.schedule ? new Date(b.schedule.startTime).getTime() : new Date(b.createdAt).getTime();
+      return ta - tb;
+    })
+    .slice(0, 12);
 
   return {
     todaySessionsCount,
@@ -61,7 +74,7 @@ export async function getAdminDashboardSummary() {
     activeStudentsCount,
     completedSessionsThisMonth: completedThisMonth.length,
     estimatedHonorThisMonth: completedThisMonth.reduce((total, session) => total + Number(session.honorRateSnapshot || 0), 0),
-    todaySessions,
+    todaySessions: sortedTodaySessions,
     lowQuotaClasses,
     lowQuotaThreshold: threshold,
   };
