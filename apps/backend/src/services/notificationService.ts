@@ -55,3 +55,48 @@ export async function markAllNotificationsRead(userId: string) {
     data: { isRead: true },
   });
 }
+
+/**
+ * Notifikasi Orang Tua (Tier 1): every Parent account linked to this
+ * student gets the same notification — a student can have more than one
+ * linked parent (Ayah + Ibu), and both should know.
+ */
+export async function notifyParentsOfStudent(
+  studentId: string,
+  data: { title: string; message: string; type?: string }
+) {
+  const links = await prisma.parentStudent.findMany({
+    where: { studentId },
+    select: { parent: { select: { userId: true } } },
+  });
+  await Promise.all(links.map((link) => createNotification({ userId: link.parent.userId, ...data })));
+}
+
+/**
+ * Same as notifyParentsOfStudent, but for a REGULAR class whose quota is
+ * shared across every actively-enrolled student — every parent of every
+ * currently-active student in the class is notified, each with a message
+ * built around their own child's name (`build`) rather than one identical
+ * blast, so "kelas yang diikuti [nama anak]" is actually their child.
+ */
+export async function notifyParentsOfClass(
+  classId: string,
+  build: (studentName: string) => { title: string; message: string; type?: string }
+) {
+  const enrollments = await prisma.classEnrollment.findMany({
+    where: { classId, status: 'ACTIVE' },
+    select: {
+      student: {
+        select: {
+          name: true,
+          parentLinks: { select: { parent: { select: { userId: true } } } },
+        },
+      },
+    },
+  });
+  const tasks = enrollments.flatMap((e) => {
+    const data = build(e.student.name);
+    return e.student.parentLinks.map((link) => createNotification({ userId: link.parent.userId, ...data }));
+  });
+  await Promise.all(tasks);
+}

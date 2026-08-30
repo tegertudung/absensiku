@@ -2,6 +2,8 @@ import { prisma } from '../utils/prisma';
 import { getApplicableHonorRate } from './honorService';
 import { logAudit } from '../utils/auditLog';
 import { getProgramForSessionType } from './programService';
+import { getSettings } from './settingsService';
+import { notifyParentsOfStudent, notifyParentsOfClass } from './notificationService';
 
 export class SessionError extends Error {
   status: number;
@@ -118,14 +120,29 @@ export async function createSessionFromSchedule(params: {
  * unit of quota. Everything happens in a single transaction — either both the
  * quota deduction and the session update succeed, or neither does.
  */
+// Notifikasi Orang Tua (Tier 1): what completeSession() found out mid-
+// transaction that the post-commit notification step needs to know about.
+type CompletionNotifyInfo =
+  | { kind: 'PRIVATE'; studentId: string; studentName: string; subjectName: string | null; score: number | null; quotaRemaining: number }
+  | { kind: 'REGULAR'; classId: string; quotaRemaining: number }
+  | null;
+
 export async function completeSession(
   sessionId: string,
   userId: string,
   actingTutorId?: string | null,
   record?: { material?: string; teachingNotes?: string; progressNotes?: string; score?: number | null }
 ) {
-  return prisma.$transaction(async (tx) => {
-    const session = await tx.teachingSession.findUnique({ where: { id: sessionId } });
+  // Read outside the transaction — staleness by a few seconds is harmless
+  // for a notification threshold, and it avoids an extra query per session
+  // inside the lock.
+  const lowQuotaThreshold = Number((await getSettings()).lowQuotaWarningThreshold) || 3;
+
+  const { completed, notifyInfo } = await prisma.$transaction(async (tx) => {
+    const session = await tx.teachingSession.findUnique({
+      where: { id: sessionId },
+      include: { subject: { select: { name: true } }, student: { select: { name: true } } },
+    });
     if (!session) throw new SessionError('Sesi tidak ditemukan', 404);
 
     assertOwnership(actingTutorId, session.tutorId);
@@ -162,6 +179,8 @@ export async function completeSession(
       );
     }
 
+    let notifyInfo: CompletionNotifyInfo = null;
+
     if (session.sessionType === 'REGULAR') {
       if (!session.classId) throw new SessionError('Sesi reguler tidak memiliki kelas', 400);
       const updatedClass = await tx.class.updateMany({
@@ -169,6 +188,8 @@ export async function completeSession(
         data: { quotaUsed: { increment: 1 }, quotaRemaining: { decrement: 1 } },
       });
       if (updatedClass.count !== 1) throw new SessionError('Kuota pertemuan kelas sudah habis.', 409);
+      const kelas = await tx.class.findUnique({ where: { id: session.classId }, select: { quotaRemaining: true } });
+      notifyInfo = { kind: 'REGULAR', classId: session.classId, quotaRemaining: kelas?.quotaRemaining ?? 0 };
     }
 
     if (session.sessionType === 'PRIVATE') {
@@ -189,7 +210,7 @@ export async function completeSession(
         );
       }
 
-      await tx.privatePackage.update({
+      const updatedPkg = await tx.privatePackage.update({
         where: { id: pkg.id },
         data: { quotaUsed: { increment: 1 }, quotaRemaining: { decrement: 1 } },
       });
@@ -204,9 +225,19 @@ export async function completeSession(
           reason: 'Sesi privat diselesaikan oleh tentor',
         },
       });
+
+      const finalScore = record?.score ?? session.score;
+      notifyInfo = {
+        kind: 'PRIVATE',
+        studentId: session.studentId,
+        studentName: session.student?.name ?? '',
+        subjectName: session.subject?.name ?? null,
+        score: finalScore != null ? Number(finalScore) : null,
+        quotaRemaining: updatedPkg.quotaRemaining,
+      };
     }
 
-    return tx.teachingSession.update({
+    const updated = await tx.teachingSession.update({
       where: { id: sessionId },
       data: {
         status: 'COMPLETED',
@@ -219,7 +250,64 @@ export async function completeSession(
         updatedBy: userId,
       },
     });
+
+    return { completed: updated, notifyInfo };
   });
+
+  // Fired only after the transaction actually commits — notifications write
+  // through the outer `prisma` client (not `tx`), so triggering them earlier
+  // could leave a "sesi selesai" notification standing for a session whose
+  // completion later rolled back.
+  notifyOfCompletion(notifyInfo, lowQuotaThreshold).catch((err) =>
+    console.error('[notify] session completion notification failed:', err)
+  );
+
+  return completed;
+}
+
+async function notifyOfCompletion(info: CompletionNotifyInfo, lowQuotaThreshold: number) {
+  if (!info) return;
+
+  if (info.kind === 'PRIVATE') {
+    const subject = info.subjectName ? ` ${info.subjectName}` : '';
+    const scoreText = info.score != null ? ` Nilai: ${info.score}.` : '';
+    await notifyParentsOfStudent(info.studentId, {
+      title: 'Sesi Privat Selesai',
+      message: `Sesi${subject} ${info.studentName} hari ini telah selesai.${scoreText}`,
+      type: 'SESSION_COMPLETED',
+    });
+
+    if (info.quotaRemaining === 0) {
+      await notifyParentsOfStudent(info.studentId, {
+        title: 'Kuota Privat Habis',
+        message: `Kuota les privat ${info.studentName} sudah habis. Hubungi Admin untuk memperpanjang.`,
+        type: 'QUOTA_LOW',
+      });
+    } else if (info.quotaRemaining === lowQuotaThreshold) {
+      await notifyParentsOfStudent(info.studentId, {
+        title: 'Kuota Privat Menipis',
+        message: `Sisa kuota les privat ${info.studentName} tinggal ${info.quotaRemaining} pertemuan lagi.`,
+        type: 'QUOTA_LOW',
+      });
+    }
+    return;
+  }
+
+  // REGULAR — quota is shared by the whole class, so every currently active
+  // parent in it gets a message built around their own child's name.
+  if (info.quotaRemaining === 0) {
+    await notifyParentsOfClass(info.classId, (studentName) => ({
+      title: 'Kuota Kelas Habis',
+      message: `Kuota pertemuan kelas yang diikuti ${studentName} sudah habis. Hubungi Admin untuk memperpanjang.`,
+      type: 'QUOTA_LOW',
+    }));
+  } else if (info.quotaRemaining === lowQuotaThreshold) {
+    await notifyParentsOfClass(info.classId, (studentName) => ({
+      title: 'Kuota Kelas Menipis',
+      message: `Sisa kuota pertemuan kelas yang diikuti ${studentName} tinggal ${info.quotaRemaining} pertemuan lagi.`,
+      type: 'QUOTA_LOW',
+    }));
+  }
 }
 
 export async function saveSessionDraft(

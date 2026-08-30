@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import RequireAuth from '@/components/RequireAuth';
+import NotificationBell from '@/components/NotificationBell';
 import { useAuthStore } from '@/store/authStore';
 import { IconHome, IconStudent } from '@/components/icons';
 
@@ -26,15 +27,18 @@ export default function ParentLayout({ children }: { children: React.ReactNode }
             </div>
             <p className="font-semibold text-gray-900">Pioneer Class</p>
           </div>
-          <button
-            onClick={() => {
-              logout();
-              router.push('/login');
-            }}
-            className="text-xs text-red-600"
-          >
-            Keluar
-          </button>
+          <div className="flex items-center gap-3">
+            <NotificationBell />
+            <button
+              onClick={() => {
+                logout();
+                router.push('/login');
+              }}
+              className="text-xs text-red-600"
+            >
+              Keluar
+            </button>
+          </div>
         </header>
 
         <main className="flex-1 px-4 py-4 pb-24">{children}</main>
