@@ -25,7 +25,7 @@ interface ClassItem {
   status: string;
   quotaTotal?: number;
   quotaRemaining?: number;
-  subject: { name: string } | null;
+  subject: { id: string; name: string } | null;
 }
 
 interface Student {
@@ -294,7 +294,7 @@ export default function AdminClassesPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex gap-3 text-xs font-medium"><button onClick={() => { setSubjectForm({ name: s.name, description: s.description || '' }); setEditingSubjectId(s.id); setShowSubjectForm(true); }} className="text-navy-900 hover:underline">Detail</button><button onClick={() => { setSubjectForm({ name: s.name, description: s.description || '' }); setEditingSubjectId(s.id); setShowSubjectForm(true); }} className="text-gray-700 hover:underline">Edit</button><button onClick={() => setDeleteSubjectTarget(s)} className="text-red-600 hover:underline">Hapus</button></div>
+                      <div className="flex gap-3 text-xs font-medium"><button onClick={() => { setSubjectForm({ name: s.name, description: s.description || '' }); setEditingSubjectId(s.id); setShowSubjectForm(true); }} className="text-navy-900 hover:underline">Edit</button><button onClick={() => setDeleteSubjectTarget(s)} className="text-red-600 hover:underline">Hapus</button></div>
                     </td>
                   </tr>
                 ))
@@ -347,7 +347,7 @@ export default function AdminClassesPage() {
                     <td className="px-4 py-3">
                       <div className="flex gap-3 text-xs font-medium">
                         <button onClick={() => openRoster(c)} className="text-navy-900 hover:underline">Detail</button>
-                        <button onClick={() => { setEditingClassId(c.id); setClassForm({ name: c.name, level: c.level || '', subjectId: '', maxStudents: String(c.maxStudents) }); setShowClassForm(true); }} className="text-gray-700 hover:underline">Edit</button>
+                        <button onClick={() => { setEditingClassId(c.id); setClassForm({ name: c.name, level: c.level || '', subjectId: c.subject?.id || '', maxStudents: String(c.maxStudents) }); setShowClassForm(true); }} className="text-gray-700 hover:underline">Edit</button>
                         <button onClick={() => setDeleteClassTarget(c)} className="text-red-600 hover:underline">Hapus</button>
                       </div>
                     </td>

@@ -133,12 +133,6 @@ export default function AdminRecapPage() {
     try { const res = await api.get('/honor/slip-summary', { params: { tutorId: filters.tutorId, month: Number(slipPeriod.month), year: Number(slipPeriod.year) } }); setSlip(res.data.data); }
     catch (err: any) { setSlipMessage(err.response?.data?.message || 'Gagal memuat data honor.'); }
   }
-  async function downloadSlip() {
-    if (!filters.tutorId) return setSlipMessage('Pilih satu Tentor untuk Slip Honor.');
-    setExporting(true); setSlipMessage('');
-    try { const res=await api.get('/honor/slip.pdf',{params:{tutorId:filters.tutorId,month:Number(slipPeriod.month),year:Number(slipPeriod.year)},responseType:'blob'}); const url=URL.createObjectURL(new Blob([res.data],{type:'application/pdf'})); const a=document.createElement('a');a.href=url;a.download=`slip-honor-${slipPeriod.month}-${slipPeriod.year}.pdf`;a.click();URL.revokeObjectURL(url); }
-    catch(err:any){setSlipMessage(err.response?.data?.message||'Gagal membuat Slip Honor.');} finally {setExporting(false);}
-  }
 
   const totalHonor = sessions
     .filter((s) => s.status === 'COMPLETED')
@@ -275,30 +269,6 @@ export default function AdminRecapPage() {
       </div>
 
       </div>
-
-      {false && <div className="grid grid-cols-2 gap-4 mb-4">
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <p className="text-xs text-gray-500">Total Sesi Selesai</p>
-          <p className="text-2xl font-semibold text-gray-900 mt-1">{totalCompleted}</p>
-        </div>
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <p className="text-xs text-gray-500">Total Estimasi Honor</p>
-          <p className="text-2xl font-semibold text-gray-900 mt-1">{formatRupiah(totalHonor)}</p>
-        </div>
-      </div>}
-
-      {false && <section className="mb-4 rounded-lg border border-gray-200 bg-white p-4">
-        <h2 className="font-medium text-gray-900">Slip Honor Tentor</h2>
-        <p className="mt-1 text-sm text-gray-500">Pilih satu Tentor dan periode untuk melihat ringkasan lalu mengunduh Slip Honor Tentor.</p>
-        <div className="mt-3 grid gap-3 md:grid-cols-4">
-          <select value={filters.tutorId} onChange={(e) => setFilters({ ...filters, tutorId: e.target.value })} className="rounded-md border border-gray-300 px-3 py-2 text-sm"><option value="">Pilih Tentor</option>{tutors.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select>
-          <select value={slipPeriod.month} onChange={e=>setSlipPeriod({...slipPeriod,month:e.target.value})} className="rounded-md border border-gray-300 px-3 py-2 text-sm">{Array.from({length:12},(_,i)=><option key={i+1} value={i+1}>{new Intl.DateTimeFormat('id-ID',{month:'long'}).format(new Date(2026,i,1))}</option>)}</select>
-          <input type="number" min="2000" value={slipPeriod.year} onChange={e=>setSlipPeriod({...slipPeriod,year:e.target.value})} className="rounded-md border border-gray-300 px-3 py-2 text-sm" />
-          <div className="flex gap-2"><button onClick={loadSlipSummary} className="rounded-md border border-navy-900 px-3 py-2 text-sm text-navy-900">Lihat Ringkasan</button><button onClick={downloadSlip} disabled={!filters.tutorId||exporting} className="rounded-md bg-navy-900 px-3 py-2 text-sm text-white disabled:opacity-60">Unduh Slip Honor</button></div>
-        </div>
-        {slipMessage&&<p className="mt-3 text-sm text-red-600">{slipMessage}</p>}
-        {slip&&<div className="mt-4 rounded-md bg-slate-50 p-4"><p className="font-medium">SLIP HONOR TENTOR</p><p className="text-sm text-gray-600">{slip.tutor.name}{slip.tutor.title ? `, ${slip.tutor.title}` : ''} · {new Intl.DateTimeFormat('id-ID',{month:'long',year:'numeric'}).format(new Date(slip.year,slip.month-1,1))}</p><table className="mt-3 w-full text-sm"><thead><tr className="text-left text-gray-500"><th>Program</th><th>Jumlah Sesi</th><th>Honor/Sesi</th><th>Subtotal</th></tr></thead><tbody>{slip.rows.map((r:any,i:number)=><tr key={i}><td className="py-1">{r.program}</td><td>{r.sessions}</td><td>{formatRupiah(r.rate)}</td><td>{formatRupiah(r.subtotal)}</td></tr>)}</tbody></table><p className="mt-2 text-sm font-medium">Total {slip.totalSessions} sesi · {formatRupiah(slip.totalHonor)}</p></div>}
-      </section>}
 
       <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
         <table className="w-full text-sm">

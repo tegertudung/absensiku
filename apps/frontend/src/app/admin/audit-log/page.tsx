@@ -22,6 +22,8 @@ const TABLE_LABELS: Record<string, string> = {
   students: 'Siswa',
   private_packages: 'Paket Privat',
   schedules: 'Jadwal',
+  classes: 'Kelas',
+  parents: 'Orang Tua',
 };
 
 function formatValues(values: Record<string, unknown> | null): string {

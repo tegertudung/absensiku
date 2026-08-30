@@ -488,6 +488,7 @@ export default function AdminStudentsPage() {
                         <div className="absolute right-0 z-10 mt-1 w-44 rounded-lg border border-gray-200 bg-white p-1 text-left shadow-lg">
                           <Link href={`/admin/students/${s.id}`} className="block rounded-md px-3 py-2 text-xs text-gray-700 hover:bg-gray-50">Detail</Link>
                           <button onClick={() => openEdit(s)} className="block w-full rounded-md px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-50">Edit</button>
+                          <button onClick={() => { setActionMenuId(null); openPackages(s); }} className="block w-full rounded-md px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-50">Kelola Paket Privat</button>
                           <div className="my-1 border-t border-gray-100" />
                           <button onClick={() => { setActionMenuId(null); setDeleteAcknowledged(false); setDeleteTarget(s); }} className="block w-full rounded-md px-3 py-2 text-left text-xs font-medium text-red-600 hover:bg-red-50">Hapus</button>
                         </div>

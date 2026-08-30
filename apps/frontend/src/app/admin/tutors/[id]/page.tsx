@@ -148,9 +148,7 @@ export default function AdminTutorDetailPage() {
                   </td>
                   <td className="px-4 py-3 text-gray-600">{s.subject?.name || '-'}</td>
                   <td className="px-4 py-3">
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">
-                      {s.status === 'ACTIVE' ? 'Aktif' : s.status}
-                    </span>
+                    <StatusBadge status={s.status} />
                   </td>
                 </tr>
               ))

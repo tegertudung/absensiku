@@ -12,7 +12,9 @@ const router = Router();
 router.get('/', requireAuth, async (_req: Request, res: Response) => {
   try {
     const classes = await prisma.class.findMany({
-      include: { subject: { select: { name: true } } },
+      // id included so the Admin Edit Kelas form can prefill the current
+      // subject — without it the dropdown always reset to blank on edit.
+      include: { subject: { select: { id: true, name: true } } },
       orderBy: { name: 'asc' },
     });
     res.json({ success: true, data: classes });
