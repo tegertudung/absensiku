@@ -1,6 +1,7 @@
 import { prisma } from '../utils/prisma';
 import { AppError } from '../utils/errors';
 import { logAudit } from '../utils/auditLog';
+import { notifyParentsOfStudent } from './notificationService';
 
 /**
  * BR-02/alur H.2 step 1: admin activates a private package for a student.
@@ -80,7 +81,7 @@ export async function extendPackage(
   if (!pkg) throw new AppError('Paket tidak ditemukan', 404);
   if (pkg.status !== 'ACTIVE') throw new AppError('Paket tidak aktif, tidak dapat ditambah kuotanya', 400);
 
-  return prisma.$transaction(async (tx) => {
+  const updated = await prisma.$transaction(async (tx) => {
     const updated = await tx.privatePackage.update({
       where: { id },
       data: {
@@ -101,6 +102,16 @@ export async function extendPackage(
 
     return updated;
   });
+
+  // Notifikasi Orang Tua Tier 2 — fired only after the transaction commits.
+  const student = await prisma.student.findUnique({ where: { id: pkg.studentId }, select: { name: true } });
+  notifyParentsOfStudent(pkg.studentId, {
+    title: 'Kuota Privat Diperpanjang',
+    message: `Kuota les privat ${student?.name ?? ''} ditambah ${additionalQuota} pertemuan oleh Admin. Sisa kuota sekarang: ${updated.quotaRemaining} pertemuan.`,
+    type: 'QUOTA_EXTENDED',
+  }).catch((err) => console.error('[notify] package extension notification failed:', err));
+
+  return updated;
 }
 
 export async function listPackagesForStudent(studentId: string) {

@@ -1,7 +1,7 @@
 import { prisma } from '../utils/prisma';
 import { AppError } from '../utils/errors';
 import { logAudit } from '../utils/auditLog';
-import { createNotification } from './notificationService';
+import { createNotification, notifyParentsOfStudent, notifyParentsOfClass } from './notificationService';
 import { getMinimumScheduleStartGapMinutes } from './settingsService';
 import { getProgramForSessionType } from './programService';
 
@@ -29,6 +29,31 @@ async function notifyTutorOfSchedule(
     message: `${DAY_NAMES[dayOfWeek]}, ${formatScheduleTime(startTime)}–${formatScheduleTime(endTime)}`,
     type,
   });
+}
+
+/**
+ * Notifikasi Orang Tua (Tier 2): mirrors notifyTutorOfSchedule but for the
+ * child(ren) attached to this schedule — a single student for PRIVATE, or
+ * every actively-enrolled student for REGULAR (the schedule belongs to the
+ * whole class, not one family).
+ */
+async function notifyParentsOfSchedule(
+  schedule: { sessionType: string; studentId: string | null; classId: string | null },
+  title: string,
+  dayOfWeek: number,
+  startTime: Date,
+  endTime: Date
+) {
+  const timeLabel = `${DAY_NAMES[dayOfWeek]}, ${formatScheduleTime(startTime)}–${formatScheduleTime(endTime)}`;
+  if (schedule.sessionType === 'PRIVATE' && schedule.studentId) {
+    await notifyParentsOfStudent(schedule.studentId, { title, message: timeLabel, type: 'SCHEDULE_CHANGE' });
+  } else if (schedule.sessionType === 'REGULAR' && schedule.classId) {
+    await notifyParentsOfClass(schedule.classId, (studentName) => ({
+      title,
+      message: `${timeLabel} (kelas yang diikuti ${studentName})`,
+      type: 'SCHEDULE_CHANGE',
+    }));
+  }
 }
 
 function timeToMinutes(d: Date): number {
@@ -303,6 +328,10 @@ export async function updateSchedule(
       updated.endTime
     );
 
+    await notifyParentsOfSchedule(updated, 'Jadwal Berubah', updated.dayOfWeek, updated.startTime, updated.endTime).catch(
+      (err) => console.error('[notify] schedule change parent notification failed:', err)
+    );
+
     if (conflicts.length > 0) {
       await notifyTutorOfSchedule(
         updated.tutorId,
@@ -337,6 +366,19 @@ export async function setScheduleStatus(
     changedBy: adminId,
     reason: `Ubah status jadwal menjadi ${status}`,
   });
+
+  // Notifikasi Orang Tua (Tier 2) — only the actual "dibatalkan" transition;
+  // INACTIVE is left alone since admins also use it to archive a schedule
+  // that's being replaced, not necessarily to disrupt an ongoing one.
+  if (status === 'CANCELLED' && schedule.status !== 'CANCELLED') {
+    await notifyParentsOfSchedule(
+      updated,
+      'Jadwal Dibatalkan',
+      updated.dayOfWeek,
+      updated.startTime,
+      updated.endTime
+    ).catch((err) => console.error('[notify] schedule cancellation parent notification failed:', err));
+  }
 
   return updated;
 }

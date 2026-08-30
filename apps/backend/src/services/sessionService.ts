@@ -372,7 +372,7 @@ export async function reportCancellation(
   userId: string,
   actingTutorId?: string | null
 ) {
-  return prisma.$transaction(async (tx) => {
+  const validation = await prisma.$transaction(async (tx) => {
     const session = await tx.teachingSession.findUnique({ where: { id: sessionId } });
     if (!session) throw new SessionError('Sesi tidak ditemukan', 404);
 
@@ -404,6 +404,38 @@ export async function reportCancellation(
       },
     });
   });
+
+  // Notifikasi Orang Tua (Tier 2) — this is the moment a parent most wants
+  // to know: today's session isn't happening. Sent as soon as the tentor
+  // reports it, not held until admin later approves/rejects the validation.
+  notifyOfCancellation(sessionId).catch((err) =>
+    console.error('[notify] session cancellation parent notification failed:', err)
+  );
+
+  return validation;
+}
+
+async function notifyOfCancellation(sessionId: string) {
+  const session = await prisma.teachingSession.findUnique({
+    where: { id: sessionId },
+    include: { subject: { select: { name: true } } },
+  });
+  if (!session) return;
+  const subject = session.subject?.name ? ` ${session.subject.name}` : '';
+
+  if (session.sessionType === 'PRIVATE' && session.studentId) {
+    await notifyParentsOfStudent(session.studentId, {
+      title: 'Sesi Dibatalkan Hari Ini',
+      message: `Sesi${subject} hari ini dibatalkan.`,
+      type: 'SESSION_CANCELLED',
+    });
+  } else if (session.sessionType === 'REGULAR' && session.classId) {
+    await notifyParentsOfClass(session.classId, (studentName) => ({
+      title: 'Sesi Dibatalkan Hari Ini',
+      message: `Sesi${subject} hari ini dibatalkan (kelas yang diikuti ${studentName}).`,
+      type: 'SESSION_CANCELLED',
+    }));
+  }
 }
 
 /**
