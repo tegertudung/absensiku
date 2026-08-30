@@ -256,7 +256,7 @@ model Schedule {
 
 model TeachingSession {
   id                   String   @id @default(uuid())
-  scheduleId           String
+  scheduleId           String?
   tutorId              String
   sessionType          String   // 'REGULAR' | 'PRIVATE'
   sessionDate          DateTime
@@ -266,6 +266,8 @@ model TeachingSession {
   studentId            String?
   subjectId            String?
   programId            String?
+  mode                 String   @default("OFFLINE")
+  location             String?
   status               String   @default("SCHEDULED")
   honorRateSnapshot    Decimal? // IMMUTABLE - Snapshot at completion time
   material             String?
@@ -279,7 +281,7 @@ model TeachingSession {
   updatedBy            String?
   updatedAt            DateTime @updatedAt
 
-  schedule Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  schedule Schedule? @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
   tutor Tutor @relation(fields: [tutorId], references: [id], onDelete: Cascade)
   class Class? @relation(fields: [classId], references: [id], onDelete: SetNull)
   student Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)

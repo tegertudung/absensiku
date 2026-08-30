@@ -5,17 +5,17 @@
   "private": true,
   "main": "dist/index.js",
   "scripts": {
-    "dev": "cross-env DOTENV_CONFIG_PATH=../../.env ts-node-dev --respawn -r dotenv/config src/index.ts",
+    "dev": "cross-env DOTENV_CONFIG_PATH=.env ts-node-dev --respawn -r dotenv/config src/index.ts",
     "postinstall": "prisma generate",
     "build": "tsc",
-    "start": "cross-env DOTENV_CONFIG_PATH=../../.env node -r dotenv/config dist/index.js",
+    "start": "cross-env DOTENV_CONFIG_PATH=.env node -r dotenv/config dist/index.js",
     "type-check": "tsc --noEmit",
     "lint": "eslint src --ext .ts || true",
     "format": "prettier --write 'src/**/*.ts' || true",
-    "test:settings-phase1": "cross-env DOTENV_CONFIG_PATH=../../.env ts-node -r dotenv/config scripts/test-settings-phase1.ts"
+    "test:settings-phase1": "cross-env DOTENV_CONFIG_PATH=.env ts-node -r dotenv/config scripts/test-settings-phase1.ts"
   },
   "prisma": {
-    "seed": "cross-env DOTENV_CONFIG_PATH=../../.env ts-node -r dotenv/config prisma/seed.ts"
+    "seed": "cross-env DOTENV_CONFIG_PATH=.env ts-node -r dotenv/config prisma/seed.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.3.1",

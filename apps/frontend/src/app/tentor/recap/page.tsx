@@ -1,9 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import api from '@/lib/api';
 import { formatRupiah, formatDate } from '@/lib/format';
 import { StatusBadge, TypeBadge } from '@/components/StatusBadge';
+import { IconClock, IconChevronRight, IconCheckCircle, IconSchedule } from '@/components/icons';
 
 interface SessionRow {
   id: string;
@@ -14,12 +16,15 @@ interface SessionRow {
   class: { name: string } | null;
   student: { name: string } | null;
   subject: { name: string } | null;
+  startTime?: string | null;
+  endTime?: string | null;
 }
 
 export default function TentorRecapPage() {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [exporting, setExporting] = useState(false);
+  const [downloadingSlip, setDownloadingSlip] = useState(false);
+  const exporting = downloadingSlip;
   const [filters, setFilters] = useState({ startDate: '', endDate: '', sessionType: '' });
   const [slipPeriod, setSlipPeriod] = useState({ month: String(new Date().getMonth() + 1), year: String(new Date().getFullYear()) });
   const [slipMessage, setSlipMessage] = useState('');
@@ -43,54 +48,36 @@ export default function TentorRecapPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters]);
 
+  // Kept only while the legacy control is present in an existing layout branch.
+  // Tentor export is intentionally disabled; Slip Honor is the download action.
+  function handleExport() { return; }
+
   useEffect(() => {
     load();
   }, [load]);
 
-  async function handleExport() {
-    setExporting(true);
-    try {
-      const res = await api.get('/export/recap.xlsx', { params: buildParams(), responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `rekap-mengajar-saya-${new Date().toISOString().split('T')[0]}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
-    } finally {
-      setExporting(false);
-    }
-  }
-
   async function downloadSlip() {
-    setExporting(true);
+    setDownloadingSlip(true);
     setSlipMessage('');
     try {
       const res = await api.get('/honor/slip.pdf', { params: { month: Number(slipPeriod.month), year: Number(slipPeriod.year) }, responseType: 'blob' });
       const url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
       const link = document.createElement('a'); link.href = url; link.download = 'slip-honor.pdf'; link.click(); URL.revokeObjectURL(url);
-    } catch (err: any) { setSlipMessage(err.response?.data?.message || 'Gagal membuat Slip Honor.'); } finally { setExporting(false); }
+    } catch (err: any) { setSlipMessage(err.response?.data?.message || 'Gagal membuat Slip Honor.'); } finally { setDownloadingSlip(false); }
   }
 
   const totalHonor = sessions
     .filter((s) => s.status === 'COMPLETED')
     .reduce((sum, s) => sum + Number(s.honorRateSnapshot || 0), 0);
   const totalCompleted = sessions.filter((s) => s.status === 'COMPLETED').length;
+  const totalMinutes = sessions.filter((s) => s.status === 'COMPLETED' && s.startTime && s.endTime).reduce((sum, s) => sum + Math.max(0, (new Date(s.endTime!).getTime() - new Date(s.startTime!).getTime()) / 60000), 0);
+  const duration = totalMinutes ? `${Math.floor(totalMinutes / 60)} jam${totalMinutes % 60 ? ` ${totalMinutes % 60} menit` : ''}` : '0 jam';
+  const monthLabel = new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' }).format(new Date(Number(slipPeriod.year), Number(slipPeriod.month) - 1, 1));
 
   return (
     <div className="space-y-4">
-      <div className="bg-navy-900 rounded-lg p-4 text-white grid grid-cols-2 gap-3">
-        <div>
-          <p className="text-xs text-navy-200">Total Sesi</p>
-          <p className="text-xl font-semibold mt-1">{totalCompleted}</p>
-        </div>
-        <div>
-          <p className="text-xs text-navy-200">Estimasi Honor</p>
-          <p className="text-xl font-semibold mt-1">{formatRupiah(totalHonor)}</p>
-        </div>
-      </div>
+      <h1 className="text-[22px] font-bold text-navy-900">Rekap Mengajar</h1>
+      <section className="rounded-2xl bg-gradient-to-br from-navy-950 to-navy-800 p-5 text-white shadow-sm"><p className="text-sm text-navy-200">Estimasi Honor</p><p className="mt-2 text-4xl font-bold tracking-tight">{formatRupiah(totalHonor)}</p><div className="mt-5 grid grid-cols-2 border-t border-white/20 pt-4"><div className="flex gap-2"><IconCheckCircle className="h-6 w-6 text-navy-100" /><div><p className="text-xl font-semibold">{totalCompleted}</p><p className="text-xs text-navy-200">Sesi Selesai</p></div></div><div className="flex gap-2 border-l border-white/20 pl-4"><IconClock className="h-6 w-6 text-navy-100" /><div><p className="text-lg font-semibold">{duration}</p><p className="text-xs text-navy-200">Jam Mengajar</p></div></div></div></section>
 
       <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-2">
         <div className="grid grid-cols-2 gap-2">

@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../utils/prisma';
 import { getApplicableHonorRate } from './honorService';
 import { logAudit } from '../utils/auditLog';
@@ -127,18 +128,20 @@ type CompletionNotifyInfo =
   | { kind: 'REGULAR'; classId: string; quotaRemaining: number }
   | null;
 
-export async function completeSession(
+type SessionRecord = { material?: string; teachingNotes?: string; progressNotes?: string; score?: number | null };
+type Tx = Prisma.TransactionClient;
+
+async function finalizeTeachingSession(
+  tx: Tx,
   sessionId: string,
   userId: string,
   actingTutorId?: string | null,
-  record?: { material?: string; teachingNotes?: string; progressNotes?: string; score?: number | null }
+  record?: SessionRecord,
+  enforceOverdue = true
 ) {
   // Read outside the transaction — staleness by a few seconds is harmless
   // for a notification threshold, and it avoids an extra query per session
   // inside the lock.
-  const lowQuotaThreshold = Number((await getSettings()).lowQuotaWarningThreshold) || 3;
-
-  const { completed, notifyInfo } = await prisma.$transaction(async (tx) => {
     const session = await tx.teachingSession.findUnique({
       where: { id: sessionId },
       include: { subject: { select: { name: true } }, student: { select: { name: true } } },
@@ -147,7 +150,7 @@ export async function completeSession(
 
     assertOwnership(actingTutorId, session.tutorId);
 
-    if (actingTutorId && isOverdue(session.sessionDate)) {
+    if (enforceOverdue && actingTutorId && isOverdue(session.sessionDate)) {
       throw new SessionError(
         `Sesi ini sudah melewati batas ${OVERDUE_DAYS} hari dan terkunci dari tentor. Hubungi admin untuk penyelesaian.`,
         409
@@ -252,7 +255,18 @@ export async function completeSession(
     });
 
     return { completed: updated, notifyInfo };
-  });
+}
+
+export async function completeSession(
+  sessionId: string,
+  userId: string,
+  actingTutorId?: string | null,
+  record?: SessionRecord
+) {
+  const lowQuotaThreshold = Number((await getSettings()).lowQuotaWarningThreshold) || 3;
+  const { completed, notifyInfo } = await prisma.$transaction((tx) =>
+    finalizeTeachingSession(tx, sessionId, userId, actingTutorId, record)
+  );
 
   // Fired only after the transaction actually commits — notifications write
   // through the outer `prisma` client (not `tx`), so triggering them earlier
@@ -262,6 +276,71 @@ export async function completeSession(
     console.error('[notify] session completion notification failed:', err)
   );
 
+  return completed;
+}
+
+export async function createDirectSession(params: {
+  tutorId: string;
+  userId: string;
+  sessionDate: Date;
+  startTime: string;
+  endTime: string;
+  sessionType: 'REGULAR' | 'PRIVATE';
+  classId?: string;
+  studentId?: string;
+  subjectId: string;
+  mode: 'OFFLINE' | 'ONLINE';
+  location?: string;
+  material: string;
+  progressNotes?: string;
+  score?: number | null;
+}) {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  if (params.sessionDate > today) throw new SessionError('Sesi mengajar tidak dapat dicatat untuk tanggal mendatang.', 422);
+  const dateKey = `${params.sessionDate.getFullYear()}-${String(params.sessionDate.getMonth() + 1).padStart(2, '0')}-${String(params.sessionDate.getDate()).padStart(2, '0')}`;
+  const start = new Date(`${dateKey}T${params.startTime}:00`);
+  const end = new Date(`${dateKey}T${params.endTime}:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+    throw new SessionError('Jam selesai harus setelah jam mulai.', 422);
+  }
+
+  const lowQuotaThreshold = Number((await getSettings()).lowQuotaWarningThreshold) || 3;
+  const { completed, notifyInfo } = await prisma.$transaction(async (tx) => {
+    const subject = await tx.subject.findFirst({ where: { id: params.subjectId, isActive: true } });
+    if (!subject) throw new SessionError('Mata pelajaran tidak ditemukan atau tidak aktif.', 404);
+
+    let classId: string | undefined;
+    let studentId: string | undefined;
+    let programId: string | null | undefined;
+    if (params.sessionType === 'REGULAR') {
+      if (!params.classId) throw new SessionError('Kelas wajib dipilih untuk sesi reguler.', 422);
+      const kelas = await tx.class.findFirst({ where: { id: params.classId, status: 'ACTIVE' } });
+      if (!kelas) throw new SessionError('Kelas tidak ditemukan atau tidak aktif.', 404);
+      classId = kelas.id;
+      programId = kelas.programId;
+    } else {
+      if (!params.studentId) throw new SessionError('Siswa wajib dipilih untuk sesi privat.', 422);
+      const student = await tx.student.findFirst({ where: { id: params.studentId, status: 'ACTIVE' } });
+      if (!student) throw new SessionError('Siswa tidak ditemukan atau tidak aktif.', 404);
+      const pkg = await tx.privatePackage.findFirst({ where: { studentId: student.id, status: 'ACTIVE', quotaRemaining: { gt: 0 } }, orderBy: { activationDate: 'asc' } });
+      if (!pkg) throw new SessionError('Kuota paket privat sudah habis. Hubungi admin untuk perpanjangan.', 409);
+      studentId = student.id;
+      programId = pkg.programId;
+    }
+    if (!programId) programId = (await tx.program.findUnique({ where: { code: params.sessionType } }))?.id;
+    const session = await tx.teachingSession.create({
+      data: {
+        tutorId: params.tutorId, sessionType: params.sessionType, sessionDate: params.sessionDate,
+        startTime: start, endTime: end, classId, studentId, subjectId: subject.id, programId,
+        status: 'SCHEDULED', createdBy: params.userId, mode: params.mode, location: params.mode === 'OFFLINE' ? params.location?.trim() || null : null,
+      },
+    });
+    return finalizeTeachingSession(tx, session.id, params.userId, params.tutorId, {
+      material: params.material, progressNotes: params.progressNotes, score: params.score,
+    }, false);
+  });
+  notifyOfCompletion(notifyInfo, lowQuotaThreshold).catch((err) => console.error('[notify] direct session notification failed:', err));
   return completed;
 }
 
@@ -540,8 +619,8 @@ export async function listSessions(filters: {
   if (!filters.hour) return sessions;
 
   return sessions.filter((s) => {
-    if (!s.schedule?.startTime) return false;
-    const d = new Date(s.schedule.startTime);
+    const d = s.startTime ? new Date(s.startTime) : s.schedule?.startTime ? new Date(s.schedule.startTime) : null;
+    if (!d) return false;
     const hh = String(d.getHours()).padStart(2, '0');
     const mm = String(d.getMinutes()).padStart(2, '0');
     return `${hh}:${mm}` === filters.hour;

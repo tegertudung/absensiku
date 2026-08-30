@@ -1,285 +1,46 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
-import { IconChevronLeft, IconWarning } from '@/components/icons';
+import { IconBook, IconCheckCircle, IconChevronLeft, IconChevronRight, IconClock, IconMapPin, IconSchedule, IconSearch, IconStudent, IconVideo, IconWarning, IconX } from '@/components/icons';
 
-interface Option {
-  id: string;
-  name: string;
-}
-
-interface ConflictRow {
-  scheduleId: string;
-  sessionType: string;
-  label: string;
-  dayOfWeek: number;
-  startTime: string;
-  endTime: string;
-}
-
+interface Option { id: string; name: string }
+interface ConflictRow { scheduleId: string; label: string; startTime: string; endTime: string }
 const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', "Jum'at", 'Sabtu'];
-
-function todayISODate() {
-  return new Date().toISOString().split('T')[0];
-}
+function localDate(date: Date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`; }
+const INITIAL_FORM = () => ({ studentId: '', subjectId: '', startDate: localDate(new Date()), startTime: '16:00', endTime: '17:30', mode: 'OFFLINE', location: '', notes: '' });
+function parseLocalDate(value: string) { return new Date(`${value}T00:00:00`); }
+function addMonths(value: Date, count: number) { const next = new Date(value); next.setMonth(next.getMonth() + count); return next; }
+function initials(name: string) { return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase(); }
+function humanDate(value: string) { return parseLocalDate(value).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); }
+function durationText(start: string, end: string) { const minutes = Number(end.slice(0, 2)) * 60 + Number(end.slice(3)) - Number(start.slice(0, 2)) * 60 - Number(start.slice(3)); if (minutes <= 0) return null; return `${Math.floor(minutes / 60) ? `${Math.floor(minutes / 60)} jam` : ''}${Math.floor(minutes / 60) && minutes % 60 ? ' ' : ''}${minutes % 60 ? `${minutes % 60} menit` : ''}`; }
 
 export default function TentorNewPrivatePage() {
   const router = useRouter();
-  const [students, setStudents] = useState<Option[]>([]);
-  const [subjects, setSubjects] = useState<Option[]>([]);
-  const [studentQuery, setStudentQuery] = useState('');
-
-  const [form, setForm] = useState({
-    studentId: '',
-    subjectId: '',
-    startDate: todayISODate(),
-    startTime: '16:00',
-    endTime: '17:30',
-    mode: 'OFFLINE',
-    location: '',
-    notes: '',
-  });
-
-  const [dayOfWeek, setDayOfWeek] = useState<number>(new Date().getDay());
-  const [conflicts, setConflicts] = useState<ConflictRow[]>([]);
-  const [checking, setChecking] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    api.get('/students').then((res) => setStudents(res.data.data.map((s: any) => ({ id: s.id, name: s.name }))));
-    api.get('/subjects').then((res) => setSubjects(res.data.data.map((s: any) => ({ id: s.id, name: s.name }))));
-  }, []);
-
-  useEffect(() => {
-    setDayOfWeek(new Date(`${form.startDate}T00:00:00`).getDay());
-  }, [form.startDate]);
-
-  // Pre-save conflict check — mirrors the mockup's inline "Jadwal Bentrok" card,
-  // shown as soon as date/time changes rather than only after submitting.
-  useEffect(() => {
-    if (!form.startDate || !form.startTime || !form.endTime) return;
-    if (form.startTime >= form.endTime) {
-      setConflicts([]);
-      return;
-    }
-    const handle = setTimeout(async () => {
-      setChecking(true);
-      try {
-        const res = await api.post('/schedules/check-conflicts', {
-          dayOfWeek,
-          startDate: form.startDate,
-          startTime: form.startTime,
-          endTime: form.endTime,
-        });
-        setConflicts(res.data.data);
-      } catch {
-        // Silent — conflict pre-check is a convenience, not a blocking validation.
-      } finally {
-        setChecking(false);
-      }
-    }, 400);
-    return () => clearTimeout(handle);
-  }, [dayOfWeek, form.startDate, form.startTime, form.endTime]);
-
-  const filteredStudents = studentQuery
-    ? students.filter((s) => s.name.toLowerCase().includes(studentQuery.toLowerCase()))
-    : students;
-
-  async function handleSubmit() {
-    setError(null);
-    if (!form.studentId) return setError('Pilih siswa terlebih dahulu.');
-    if (!form.subjectId) return setError('Pilih mata pelajaran.');
-    if (form.startTime >= form.endTime) return setError('Jam mulai harus sebelum jam selesai.');
-
-    setSubmitting(true);
-    try {
-      await api.post('/schedules', {
-        sessionType: 'PRIVATE',
-        studentId: form.studentId,
-        subjectId: form.subjectId,
-        dayOfWeek,
-        startDate: form.startDate,
-        startTime: form.startTime,
-        endTime: form.endTime,
-        mode: form.mode,
-        location: form.mode === 'OFFLINE' && form.location.trim() ? form.location.trim() : undefined,
-        notes: form.notes || undefined,
-      });
-      router.push('/tentor/schedule');
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Gagal menyimpan jadwal privat.');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <div className="space-y-4">
-      <button onClick={() => router.back()} className="flex items-center gap-1 text-sm text-gray-500">
-        <IconChevronLeft className="w-4 h-4" />
-        Kembali
-      </button>
-
-      <h1 className="text-lg font-semibold text-gray-900">Tambah Jadwal Privat</h1>
-
-      {error && (
-        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">{error}</p>
-      )}
-
-      <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-4">
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Cari Siswa</label>
-          <input
-            type="text"
-            value={studentQuery}
-            onChange={(e) => setStudentQuery(e.target.value)}
-            placeholder="Ketik nama siswa..."
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm mb-2"
-          />
-          <select
-            value={form.studentId}
-            onChange={(e) => setForm({ ...form, studentId: e.target.value })}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-          >
-            <option value="">Pilih siswa</option>
-            {filteredStudents.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Mata Pelajaran</label>
-          <select
-            value={form.subjectId}
-            onChange={(e) => setForm({ ...form, subjectId: e.target.value })}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-          >
-            <option value="">Pilih mata pelajaran</option>
-            {subjects.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Tanggal</label>
-          <input
-            type="date"
-            value={form.startDate}
-            onChange={(e) => setForm({ ...form, startDate: e.target.value })}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-          />
-          <p className="text-[11px] text-gray-400 mt-1">
-            Jadwal rutin setiap hari {DAY_NAMES[dayOfWeek]}
-          </p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Jam Mulai</label>
-            <input
-              type="time"
-              value={form.startTime}
-              onChange={(e) => setForm({ ...form, startTime: e.target.value })}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Jam Selesai</label>
-            <input
-              type="time"
-              value={form.endTime}
-              onChange={(e) => setForm({ ...form, endTime: e.target.value })}
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Mode</label>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setForm({ ...form, mode: 'OFFLINE' })}
-              className={`flex-1 rounded-md border py-2 text-sm font-medium ${
-                form.mode === 'OFFLINE' ? 'border-navy-900 bg-navy-900 text-white' : 'border-gray-300 text-gray-600'
-              }`}
-            >
-              Offline
-            </button>
-            <button
-              type="button"
-              onClick={() => setForm({ ...form, mode: 'ONLINE' })}
-              className={`flex-1 rounded-md border py-2 text-sm font-medium ${
-                form.mode === 'ONLINE' ? 'border-navy-900 bg-navy-900 text-white' : 'border-gray-300 text-gray-600'
-              }`}
-            >
-              Online
-            </button>
-          </div>
-        </div>
-
-        {form.mode === 'OFFLINE' && (
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Lokasi (opsional)</label>
-            <input
-              type="text"
-              value={form.location}
-              onChange={(e) => setForm({ ...form, location: e.target.value })}
-              placeholder="cth. Cabang Sudirman"
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            />
-          </div>
-        )}
-
-        {checking && <p className="text-xs text-gray-400">Memeriksa jadwal bentrok...</p>}
-
-        {!checking && conflicts.length > 0 && (
-          <div className="flex gap-2 bg-amber-50 border border-amber-200 rounded-md px-3 py-3">
-            <IconWarning className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-amber-800">Jadwal Bentrok</p>
-              {conflicts.map((c) => (
-                <p key={c.scheduleId} className="text-xs text-amber-700 mt-0.5">
-                  Waktu ini tumpang tindih dengan &quot;{c.label}&quot; ({c.startTime}–{c.endTime}).
-                </p>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Catatan (opsional)</label>
-          <textarea
-            value={form.notes}
-            onChange={(e) => setForm({ ...form, notes: e.target.value })}
-            rows={3}
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-            placeholder="Catatan tambahan..."
-          />
-        </div>
-
-        <button
-          onClick={handleSubmit}
-          disabled={submitting}
-          className="w-full rounded-md bg-navy-900 text-white text-sm font-medium py-2.5 disabled:opacity-60 hover:bg-navy-800"
-        >
-          {submitting ? 'Menyimpan...' : 'Simpan Jadwal Privat'}
-        </button>
-        {conflicts.length > 0 && (
-          <p className="text-[11px] text-center text-gray-400">
-            Jadwal tetap bisa disimpan meski bentrok — admin akan meninjau ulang.
-          </p>
-        )}
-      </div>
-    </div>
-  );
+  const [students, setStudents] = useState<Option[]>([]), [subjects, setSubjects] = useState<Option[]>([]), [dataLoading, setDataLoading] = useState(true);
+  const [form, setForm] = useState(INITIAL_FORM), [studentSheet, setStudentSheet] = useState(false), [subjectSheet, setSubjectSheet] = useState(false), [dateSheet, setDateSheet] = useState(false);
+  const [studentQuery, setStudentQuery] = useState(''), [subjectQuery, setSubjectQuery] = useState(''), [calendarMonth, setCalendarMonth] = useState(() => new Date());
+  const [conflicts, setConflicts] = useState<ConflictRow[]>([]), [checking, setChecking] = useState(false), [submitting, setSubmitting] = useState(false), [error, setError] = useState<string | null>(null), [success, setSuccess] = useState(false);
+  const selectedStudent = students.find((item) => item.id === form.studentId), selectedSubject = subjects.find((item) => item.id === form.subjectId);
+  const dayOfWeek = parseLocalDate(form.startDate).getDay(), duration = durationText(form.startTime, form.endTime);
+  const timeError = form.startTime && form.endTime && !duration ? 'Jam selesai harus setelah jam mulai.' : null;
+  const filteredStudents = useMemo(() => students.filter((item) => item.name.toLowerCase().includes(studentQuery.toLowerCase())), [students, studentQuery]);
+  const filteredSubjects = useMemo(() => subjects.filter((item) => item.name.toLowerCase().includes(subjectQuery.toLowerCase())), [subjects, subjectQuery]);
+  useEffect(() => { Promise.all([api.get('/students'), api.get('/subjects')]).then(([studentRes, subjectRes]) => { setStudents(studentRes.data.data.map((item: any) => ({ id: item.id, name: item.name }))); setSubjects(subjectRes.data.data.map((item: any) => ({ id: item.id, name: item.name }))); }).catch(() => setError('Gagal memuat pilihan form. Silakan coba lagi.')).finally(() => setDataLoading(false)); }, []);
+  useEffect(() => { if (!form.startDate || !form.startTime || !form.endTime || !duration) { setConflicts([]); return; } const timer = setTimeout(async () => { setChecking(true); try { const res = await api.post('/schedules/check-conflicts', { dayOfWeek, startDate: form.startDate, startTime: form.startTime, endTime: form.endTime }); setConflicts(res.data.data); } catch { setConflicts([]); } finally { setChecking(false); } }, 400); return () => clearTimeout(timer); }, [dayOfWeek, duration, form.endTime, form.startDate, form.startTime]);
+  function update(values: Partial<typeof form>) { setForm((current) => ({ ...current, ...values })); }
+  function resetForm() { setForm(INITIAL_FORM()); setError(null); setConflicts([]); setSuccess(false); }
+  async function handleSubmit() { setError(null); if (!form.studentId) return setError('Pilih siswa terlebih dahulu.'); if (!form.subjectId) return setError('Pilih mata pelajaran.'); if (!duration) return setError('Jam selesai harus setelah jam mulai.'); setSubmitting(true); try { await api.post('/schedules', { sessionType: 'PRIVATE', studentId: form.studentId, subjectId: form.subjectId, dayOfWeek, startDate: form.startDate, startTime: form.startTime, endTime: form.endTime, mode: form.mode, location: form.mode === 'OFFLINE' && form.location.trim() ? form.location.trim() : undefined, notes: form.notes || undefined }); setSuccess(true); } catch (err: any) { setError(err.response?.data?.message || 'Gagal membuat jadwal. Silakan coba lagi.'); } finally { setSubmitting(false); } }
+  if (success) return <SuccessState student={selectedStudent} subject={selectedSubject} form={form} duration={duration} onSchedule={() => router.push('/tentor/schedule')} onAgain={resetForm} />;
+  return <div className="mx-auto w-full max-w-md pb-28 pt-1"><button onClick={() => router.back()} className="flex min-h-11 items-center gap-1 text-sm font-medium text-gray-500 hover:text-navy-900"><IconChevronLeft className="h-5 w-5" />Kembali</button><header className="mb-7 mt-3"><h1 className="text-2xl font-semibold tracking-tight text-navy-900">Tambah Jadwal Privat</h1><p className="mt-1 text-sm text-gray-500">Buat sesi privat baru untuk siswa</p></header>{error && <div role="alert" className="mb-5 flex gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700"><IconWarning className="mt-0.5 h-4 w-4 shrink-0" /><span>{error}</span></div>}<div className="space-y-6"><FormSection label="Siswa"><SelectorButton icon={<IconStudent className="h-5 w-5" />} title={selectedStudent?.name || 'Pilih siswa'} subtitle={selectedStudent ? 'Siswa dipilih' : dataLoading ? 'Memuat siswa...' : 'Cari dari daftar'} selected={!!selectedStudent} onClick={() => setStudentSheet(true)} trailing={selectedStudent ? <IconCheckCircle className="h-5 w-5 text-green-600" /> : <IconChevronRight className="h-5 w-5" />} /></FormSection><FormSection label="Mata Pelajaran"><SelectorButton icon={<IconBook className="h-5 w-5" />} title={selectedSubject?.name || 'Pilih mata pelajaran'} subtitle={selectedSubject ? undefined : dataLoading ? 'Memuat mata pelajaran...' : undefined} selected={!!selectedSubject} onClick={() => setSubjectSheet(true)} trailing={<IconChevronRight className="h-5 w-5" />} /></FormSection><FormSection label="Jadwal"><SelectorButton icon={<IconSchedule className="h-5 w-5" />} title={humanDate(form.startDate)} onClick={() => { setCalendarMonth(parseLocalDate(form.startDate)); setDateSheet(true); }} trailing={<IconChevronRight className="h-5 w-5" />} /><p className="mt-2 text-xs font-medium text-navy-700">Jadwal berulang setiap {DAY_NAMES[dayOfWeek]}</p></FormSection><FormSection label="Waktu"><div className="grid grid-cols-2 gap-3"><TimeField label="Jam Mulai" value={form.startTime} onChange={(value) => update({ startTime: value })} /><TimeField label="Jam Selesai" value={form.endTime} onChange={(value) => update({ endTime: value })} /></div>{timeError ? <p className="mt-2 text-xs text-red-600">{timeError}</p> : duration && <p className="mt-2 flex items-center gap-1.5 rounded-xl bg-navy-50 px-3 py-2 text-xs text-navy-800"><IconClock className="h-4 w-4" />Durasi sesi {duration}</p>}</FormSection><FormSection label="Mode Belajar"><div className="grid grid-cols-2 gap-2"><ModeButton active={form.mode === 'OFFLINE'} onClick={() => update({ mode: 'OFFLINE' })} icon={<IconMapPin className="h-4 w-4" />}>Offline</ModeButton><ModeButton active={form.mode === 'ONLINE'} onClick={() => update({ mode: 'ONLINE' })} icon={<IconVideo className="h-4 w-4" />}>Online</ModeButton></div>{form.mode === 'OFFLINE' && <div className="mt-3"><label className="sr-only" htmlFor="location">Lokasi</label><div className="relative"><IconMapPin className="pointer-events-none absolute left-3 top-3 h-5 w-5 text-gray-400" /><input id="location" value={form.location} onChange={(event) => update({ location: event.target.value })} placeholder="Masukkan lokasi..." className="min-h-12 w-full rounded-xl border border-gray-200 py-3 pl-10 pr-3 text-sm text-gray-900 outline-none transition focus:border-navy-700 focus:ring-2 focus:ring-navy-100" /></div></div>}</FormSection>{checking && <p className="text-xs text-gray-400">Memeriksa jadwal bentrok...</p>}{!checking && conflicts.length > 0 && <div className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3"><IconWarning className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" /><div><p className="text-sm font-medium text-amber-800">Jadwal Bentrok</p>{conflicts.map((conflict) => <p key={conflict.scheduleId} className="mt-0.5 text-xs text-amber-700">Waktu ini tumpang tindih dengan &quot;{conflict.label}&quot; ({conflict.startTime}–{conflict.endTime}).</p>)}</div></div>}<FormSection label="Catatan" optional><textarea value={form.notes} onChange={(event) => update({ notes: event.target.value })} rows={4} placeholder="Catatan tambahan..." className="w-full resize-none rounded-xl border border-gray-200 px-3 py-3 text-sm outline-none transition focus:border-navy-700 focus:ring-2 focus:ring-navy-100" /></FormSection><SessionSummary student={selectedStudent} subject={selectedSubject} form={form} duration={duration} /></div><div className="fixed inset-x-0 bottom-0 z-10 border-t border-gray-100 bg-white/95 px-4 py-3 backdrop-blur"><div className="mx-auto max-w-md"><button onClick={handleSubmit} disabled={submitting || !form.studentId || !form.subjectId || !duration} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-navy-900 px-4 text-sm font-semibold text-white transition hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-45"><IconSchedule className="h-5 w-5" />{submitting ? 'Membuat Jadwal...' : 'Buat Jadwal Privat'}</button></div></div>{studentSheet && <OptionSheet title="Pilih Siswa" query={studentQuery} setQuery={setStudentQuery} placeholder="Cari nama siswa..." items={filteredStudents} selectedId={form.studentId} loading={dataLoading} emptyText={studentQuery ? 'Tidak ada siswa dengan nama tersebut.' : 'Tidak ada siswa ditemukan.'} onClose={() => setStudentSheet(false)} onSelect={(id) => { update({ studentId: id }); setStudentSheet(false); }} icon={<IconStudent className="h-5 w-5" />} />}{subjectSheet && <OptionSheet title="Pilih Mata Pelajaran" query={subjectQuery} setQuery={setSubjectQuery} placeholder="Cari mata pelajaran..." items={filteredSubjects} selectedId={form.subjectId} loading={dataLoading} emptyText="Tidak ada mata pelajaran ditemukan." onClose={() => setSubjectSheet(false)} onSelect={(id) => { update({ subjectId: id }); setSubjectSheet(false); }} icon={<IconBook className="h-5 w-5" />} />}{dateSheet && <DateSheet month={calendarMonth} setMonth={setCalendarMonth} value={form.startDate} onClose={() => setDateSheet(false)} onSelect={(value) => { update({ startDate: value }); setDateSheet(false); }} />}</div>;
 }
+
+function FormSection({ label, optional, children }: { label: string; optional?: boolean; children: React.ReactNode }) { return <section><h2 className="mb-2 text-sm font-semibold text-navy-900">{label}{optional && <span className="font-normal text-gray-400"> (opsional)</span>}</h2>{children}</section>; }
+function SelectorButton({ icon, title, subtitle, selected, trailing, onClick }: { icon: React.ReactNode; title: string; subtitle?: string; selected?: boolean; trailing: React.ReactNode; onClick: () => void }) { return <button type="button" onClick={onClick} className={`flex min-h-14 w-full items-center gap-3 rounded-xl border px-3 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-navy-700 focus-visible:ring-offset-2 ${selected ? 'border-navy-300 bg-navy-50/50' : 'border-gray-200 bg-white hover:border-navy-200'}`}><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-navy-50 text-navy-700">{icon}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium text-navy-900">{title}</span>{subtitle && <span className="mt-0.5 block truncate text-xs text-gray-500">{subtitle}</span>}</span><span className="shrink-0 text-gray-400">{trailing}</span></button>; }
+function TimeField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) { return <label className="block rounded-xl border border-gray-200 px-3 py-2.5 focus-within:border-navy-700 focus-within:ring-2 focus-within:ring-navy-100"><span className="block text-xs text-gray-500">{label}</span><span className="mt-1 flex items-center gap-2"><IconClock className="h-4 w-4 text-gray-400" /><input type="time" value={value} onChange={(event) => onChange(event.target.value)} className="min-w-0 bg-transparent text-sm font-medium text-navy-900 outline-none" /></span></label>; }
+function ModeButton({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) { return <button type="button" onClick={onClick} aria-pressed={active} className={`flex min-h-12 items-center justify-center gap-2 rounded-xl border text-sm font-medium transition ${active ? 'border-navy-900 bg-navy-900 text-white' : 'border-gray-200 bg-white text-navy-900 hover:bg-navy-50'}`}>{icon}{children}</button>; }
+function OptionSheet({ title, query, setQuery, placeholder, items, selectedId, loading, emptyText, onClose, onSelect, icon }: { title: string; query: string; setQuery: (value: string) => void; placeholder: string; items: Option[]; selectedId: string; loading: boolean; emptyText: string; onClose: () => void; onSelect: (id: string) => void; icon: React.ReactNode }) { return <div className="fixed inset-0 z-30 flex items-end bg-slate-950/35" role="dialog" aria-modal="true" aria-label={title}><div className="max-h-[82vh] w-full rounded-t-3xl bg-white px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 shadow-2xl"><div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-gray-200" /><div className="mb-4 flex items-center justify-between"><h2 className="text-base font-semibold text-navy-900">{title}</h2><button onClick={onClose} aria-label="Tutup" className="flex h-10 w-10 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100"><IconX className="h-5 w-5" /></button></div><label className="relative mb-3 block"><span className="sr-only">{placeholder}</span><IconSearch className="pointer-events-none absolute left-3 top-3 h-5 w-5 text-gray-400" /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder={placeholder} className="min-h-11 w-full rounded-xl border border-gray-200 py-2 pl-10 pr-3 text-sm outline-none focus:border-navy-700 focus:ring-2 focus:ring-navy-100" /></label><div className="max-h-[52vh] overflow-y-auto pb-2">{loading ? <p className="px-3 py-8 text-center text-sm text-gray-400">Memuat pilihan...</p> : items.length === 0 ? <p className="px-3 py-8 text-center text-sm text-gray-400">{emptyText}</p> : items.map((item) => { const selected = item.id === selectedId; return <button key={item.id} type="button" onClick={() => onSelect(item.id)} className={`flex min-h-14 w-full items-center gap-3 rounded-xl px-3 text-left transition ${selected ? 'bg-navy-50 text-navy-900' : 'hover:bg-gray-50'}`}><span className="flex h-9 w-9 items-center justify-center rounded-full bg-navy-50 text-xs font-semibold text-navy-700">{title === 'Pilih Siswa' ? initials(item.name) : icon}</span><span className="flex-1 text-sm font-medium">{item.name}</span><span className={`flex h-5 w-5 items-center justify-center rounded-full border ${selected ? 'border-navy-700 bg-navy-700 text-white' : 'border-gray-300'}`}>{selected && <IconCheckCircle className="h-4 w-4" />}</span></button>; })}</div></div></div>; }
+function DateSheet({ month, setMonth, value, onClose, onSelect }: { month: Date; setMonth: (date: Date) => void; value: string; onClose: () => void; onSelect: (value: string) => void }) { const first = new Date(month.getFullYear(), month.getMonth(), 1), start = new Date(first); start.setDate(first.getDate() - ((first.getDay() + 6) % 7)); const days = Array.from({ length: 42 }, (_, index) => { const day = new Date(start); day.setDate(start.getDate() + index); return day; }); return <div className="fixed inset-0 z-30 flex items-end bg-slate-950/35" role="dialog" aria-modal="true" aria-label="Pilih Tanggal"><div className="w-full rounded-t-3xl bg-white px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3"><div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-gray-200" /><div className="mb-4 flex items-center justify-between"><h2 className="text-base font-semibold text-navy-900">Pilih Tanggal</h2><button onClick={onClose} aria-label="Tutup" className="flex h-10 w-10 items-center justify-center rounded-full text-gray-500 hover:bg-gray-100"><IconX className="h-5 w-5" /></button></div><div className="mb-4 flex items-center justify-between"><button onClick={() => setMonth(addMonths(month, -1))} aria-label="Bulan sebelumnya" className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-gray-100"><IconChevronLeft className="h-5 w-5" /></button><p className="text-sm font-semibold text-navy-900">{month.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}</p><button onClick={() => setMonth(addMonths(month, 1))} aria-label="Bulan berikutnya" className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-gray-100"><IconChevronRight className="h-5 w-5" /></button></div><div className="grid grid-cols-7 text-center text-[11px] text-gray-400">{['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'].map((day) => <span key={day} className="py-2">{day}</span>)}{days.map((day) => { const key = localDate(day), selected = key === value, currentMonth = day.getMonth() === month.getMonth(); return <button key={key} type="button" onClick={() => onSelect(key)} className={`mx-auto flex h-10 w-10 items-center justify-center rounded-full text-sm font-medium transition ${selected ? 'bg-navy-900 text-white' : currentMonth ? 'text-navy-900 hover:bg-navy-50' : 'text-gray-300'}`}>{day.getDate()}</button>; })}</div></div></div>; }
+function SessionSummary({ student, subject, form, duration }: { student?: Option; subject?: Option; form: ReturnType<typeof INITIAL_FORM>; duration: string | null }) { const rows = [{ icon: <IconStudent className="h-4 w-4" />, value: student?.name || 'Belum dipilih', label: 'Siswa' }, { icon: <IconBook className="h-4 w-4" />, value: subject?.name || 'Belum dipilih', label: 'Mata Pelajaran' }, { icon: <IconSchedule className="h-4 w-4" />, value: humanDate(form.startDate), label: 'Tanggal · berulang setiap minggu' }, { icon: <IconClock className="h-4 w-4" />, value: `${form.startTime} – ${form.endTime}`, label: duration || 'Waktu belum valid' }, { icon: form.mode === 'OFFLINE' ? <IconMapPin className="h-4 w-4" /> : <IconVideo className="h-4 w-4" />, value: form.mode === 'OFFLINE' ? `Offline${form.location ? ` · ${form.location}` : ''}` : 'Online', label: 'Mode & Lokasi' }]; return <section className="rounded-2xl border border-gray-200 bg-white p-4"><h2 className="mb-2 text-sm font-semibold text-navy-900">Ringkasan Sesi</h2><div className="divide-y divide-gray-100">{rows.map((row) => <div key={row.label} className="flex gap-3 py-2.5"><span className="mt-0.5 text-navy-700">{row.icon}</span><div className="min-w-0"><p className="truncate text-sm font-medium text-navy-900">{row.value}</p><p className="text-xs text-gray-500">{row.label}</p></div></div>)}</div></section>; }
+function SuccessState({ student, subject, form, duration, onSchedule, onAgain }: { student?: Option; subject?: Option; form: ReturnType<typeof INITIAL_FORM>; duration: string | null; onSchedule: () => void; onAgain: () => void }) { return <div className="mx-auto flex min-h-[calc(100vh-2rem)] w-full max-w-md flex-col justify-center py-8"><div className="text-center"><span className="mx-auto flex h-16 w-16 animate-[pulse_0.6s_ease-out_1] items-center justify-center rounded-full bg-green-100 text-green-600"><IconCheckCircle className="h-9 w-9" /></span><h1 className="mt-5 text-xl font-semibold text-navy-900">Jadwal berhasil dibuat!</h1><p className="mt-2 text-sm leading-6 text-gray-500">Sesi privat baru telah ditambahkan ke dalam jadwal Anda.</p></div><div className="mt-7"><SessionSummary student={student} subject={subject} form={form} duration={duration} /></div><div className="mt-6 space-y-3"><button onClick={onSchedule} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-navy-900 text-sm font-semibold text-white"><IconSchedule className="h-5 w-5" />Lihat Jadwal</button><button onClick={onAgain} className="min-h-12 w-full rounded-xl border border-navy-300 text-sm font-semibold text-navy-800">Tambah Jadwal Lagi</button></div></div>; }
