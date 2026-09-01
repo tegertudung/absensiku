@@ -44,6 +44,7 @@ export async function getAdminDashboardSummary() {
     prisma.teachingSession.count({
       where: { sessionDate: { gte: start, lt: end } },
     }),
+<<<<<<< HEAD
     prisma.sessionValidation.count({ where: { decision: "PENDING" } }),
     prisma.privatePackage.findMany({
       where: { status: "ACTIVE", quotaRemaining: { lte: threshold } },
@@ -63,6 +64,20 @@ export async function getAdminDashboardSummary() {
       },
       orderBy: [{ schedule: { startTime: "asc" } }, { createdAt: "asc" }],
       take: 12,
+=======
+    prisma.tutor.count({ where: { status: 'ACTIVE' } }),
+    prisma.student.count({ where: { status: 'ACTIVE' } }),
+    // Sorted in JS below, not via `orderBy` on the `schedule` relation — Neon
+    // production hit a Postgres error ("WITHIN GROUP is required for
+    // ordered-set aggregate mode") on exactly this relation-orderBy shape
+    // that never reproduced locally, so it's avoided outright rather than
+    // chased further. Today's row count is small; sorting client-side after
+    // fetch is cheap and sidesteps the whole class of risk.
+    prisma.teachingSession.findMany({
+      where: { sessionDate: { gte: start, lt: end } },
+      include: { tutor: { select: { name: true } }, class: { select: { name: true } }, student: { select: { name: true } }, subject: { select: { name: true } }, schedule: { select: { startTime: true } } },
+      orderBy: { createdAt: 'asc' },
+>>>>>>> 6eff952b01e05c182f666562c8c8b573c811c93e
     }),
     prisma.teachingSession.findMany({
       where: {
@@ -80,6 +95,14 @@ export async function getAdminDashboardSummary() {
     }),
   ]);
 
+  const sortedTodaySessions = [...todaySessions]
+    .sort((a, b) => {
+      const ta = a.schedule ? new Date(a.schedule.startTime).getTime() : new Date(a.createdAt).getTime();
+      const tb = b.schedule ? new Date(b.schedule.startTime).getTime() : new Date(b.createdAt).getTime();
+      return ta - tb;
+    })
+    .slice(0, 12);
+
   return {
     todaySessionsCount,
     pendingValidationsCount,
@@ -87,11 +110,16 @@ export async function getAdminDashboardSummary() {
     activeTutorsCount,
     activeStudentsCount,
     completedSessionsThisMonth: completedThisMonth.length,
+<<<<<<< HEAD
     estimatedHonorThisMonth: completedThisMonth.reduce(
       (total, session) => total + Number(session.honorRateSnapshot || 0),
       0,
     ),
     todaySessions,
+=======
+    estimatedHonorThisMonth: completedThisMonth.reduce((total, session) => total + Number(session.honorRateSnapshot || 0), 0),
+    todaySessions: sortedTodaySessions,
+>>>>>>> 6eff952b01e05c182f666562c8c8b573c811c93e
     lowQuotaClasses,
     lowQuotaThreshold: threshold,
   };

@@ -16,6 +16,7 @@ interface SessionRow {
   sessionType: string;
   status: string;
   honorRateSnapshot: string | null;
+  startTime: string | null;
   tutor: { name: string };
   class: { name: string } | null;
   student: { name: string } | null;

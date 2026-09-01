@@ -37,8 +37,12 @@ export async function listChildrenForParent(parentId: string) {
         },
       },
     },
-    orderBy: { student: { name: 'asc' } },
   });
+
+  // Sorted in JS, not via `orderBy` on the `student` relation — see the note
+  // on the same pattern in dashboardService.ts (production Postgres error
+  // on relation-orderBy that never reproduced locally, avoided outright).
+  links.sort((a, b) => a.student.name.localeCompare(b.student.name));
 
   return links.map((link) => ({
     relationship: link.relationship,
