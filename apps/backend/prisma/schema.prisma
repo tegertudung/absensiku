@@ -15,17 +15,17 @@ datasource db {
 // ============================================
 
 model User {
-  id        String    @id @default(uuid())
-  email     String    @unique
+  id           String    @id @default(uuid())
+  email        String    @unique
   passwordHash String
-  role      String    // 'ADMIN' | 'TENTOR'
-  isActive  Boolean   @default(true)
-  lastLogin DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  role         String // 'ADMIN' | 'TENTOR'
+  isActive     Boolean   @default(true)
+  lastLogin    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
-  tutor Tutor?
-  parent Parent?
+  tutor             Tutor?
+  parent            Parent?
   pushSubscriptions PushSubscription[]
 
   @@index([email])
@@ -37,44 +37,48 @@ model User {
 // ============================================
 
 model Tutor {
-  id           String   @id @default(uuid())
-  userId       String   @unique
-  name         String
-  phone        String?
-  email        String?
-  hireDate     DateTime?
-  status       String   @default("ACTIVE") // 'ACTIVE' | 'INACTIVE' | 'ON_LEAVE'
-  bankAccount  String?
-  bankName     String?
+  id             String    @id @default(uuid())
+  userId         String    @unique
+  name           String
+  phone          String?
+  email          String?
+  hireDate       DateTime?
+  status         String    @default("ACTIVE") // 'ACTIVE' | 'INACTIVE' | 'ON_LEAVE'
+  bankAccount    String?
+  bankName       String?
   bankHolderName String?
-  notes        String?
-  title        String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  notes          String?
+  title          String?
+  deletedAt      DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  schedules Schedule[]
-  sessions TeachingSession[]
+  user           User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  schedules      Schedule[]
+  sessions       TeachingSession[]
+  subjects       TutorSubject[]
+  changeRequests ScheduleChangeRequest[]
 
   @@index([userId])
   @@index([status])
+  @@index([deletedAt])
 }
 
 model Program {
-  id                    String   @id @default(uuid())
-  code                  String   @unique
-  name                  String
-  learningModel         String
-  usesQuota             Boolean  @default(true)
-  defaultMeetingQuota   Int      @default(24)
-  isActive              Boolean  @default(true)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  classes               Class[]
-  privatePackages       PrivatePackage[]
-  schedules             Schedule[]
-  sessions              TeachingSession[]
-  honorRates            HonorRate[]
+  id                  String            @id @default(uuid())
+  code                String            @unique
+  name                String
+  learningModel       String
+  usesQuota           Boolean           @default(true)
+  defaultMeetingQuota Int               @default(24)
+  isActive            Boolean           @default(true)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  classes             Class[]
+  privatePackages     PrivatePackage[]
+  schedules           Schedule[]
+  sessions            TeachingSession[]
+  honorRates          HonorRate[]
 }
 
 model SystemSetting {
@@ -89,19 +93,19 @@ model SystemSetting {
 // ============================================
 
 model Student {
-  id             String   @id @default(uuid())
-  name           String
-  phone          String?
-  email          String?
-  guardianName   String?
-  guardianPhone  String?
-  status         String   @default("ACTIVE") // 'ACTIVE' | 'INACTIVE' | 'GRADUATED'
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id            String   @id @default(uuid())
+  name          String
+  phone         String?
+  email         String?
+  guardianName  String?
+  guardianPhone String?
+  status        String   @default("ACTIVE") // 'ACTIVE' | 'INACTIVE' | 'GRADUATED'
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  packages PrivatePackage[]
-  sessions TeachingSession[]
-  schedules Schedule[]
+  packages    PrivatePackage[]
+  sessions    TeachingSession[]
+  schedules   Schedule[]
   enrollments ClassEnrollment[]
   parentLinks ParentStudent[]
 
@@ -150,17 +154,31 @@ model ParentStudent {
 // ============================================
 
 model Subject {
-  id        String   @id @default(uuid())
-  name      String   @unique
+  id          String   @id @default(uuid())
+  name        String   @unique
   description String?
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
 
-  classes Class[]
-  sessions TeachingSession[]
+  sessions  TeachingSession[]
   schedules Schedule[]
+  tutors    TutorSubject[]
 
   @@index([isActive])
+}
+
+model TutorSubject {
+  id        String   @id @default(uuid())
+  tutorId   String
+  subjectId String
+  createdAt DateTime @default(now())
+
+  tutor   Tutor   @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  @@unique([tutorId, subjectId])
+  @@index([tutorId])
+  @@index([subjectId])
 }
 
 // ============================================
@@ -168,26 +186,22 @@ model Subject {
 // ============================================
 
 model Class {
-  id          String   @id @default(uuid())
-  name        String   @unique
-  level       String?
-  subjectId   String?
-  programId   String?
-  maxStudents Int      @default(20)
-  quotaTotal Int      @default(24)
-  quotaUsed Int      @default(0)
+  id             String   @id @default(uuid())
+  name           String   @unique
+  level          String?
+  programId      String?
+  quotaTotal     Int      @default(24)
+  quotaUsed      Int      @default(0)
   quotaRemaining Int      @default(24)
-  status      String   @default("ACTIVE") // 'ACTIVE' | 'INACTIVE'
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  status         String   @default("ACTIVE") // 'ACTIVE' | 'INACTIVE'
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  subject Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
-  program Program? @relation(fields: [programId], references: [id], onDelete: SetNull)
-  schedules Schedule[]
-  sessions TeachingSession[]
+  program     Program?          @relation(fields: [programId], references: [id], onDelete: SetNull)
+  schedules   Schedule[]
+  sessions    TeachingSession[]
   enrollments ClassEnrollment[]
 
-  @@index([subjectId])
   @@index([programId])
   @@index([status])
 }
@@ -217,30 +231,31 @@ model ClassEnrollment {
 // ============================================
 
 model Schedule {
-  id          String   @id @default(uuid())
-  tutorId     String
-  sessionType String   // 'REGULAR' | 'PRIVATE'
+  id          String    @id @default(uuid())
+  tutorId     String?
+  sessionType String // 'REGULAR' | 'PRIVATE'
   classId     String?
   studentId   String?
   subjectId   String?
   programId   String?
-  dayOfWeek   Int      // 0=Sunday, 6=Saturday
+  dayOfWeek   Int // 0=Sunday, 6=Saturday
   startTime   DateTime
   endTime     DateTime
   startDate   DateTime
   endDate     DateTime?
-  status      String   @default("ACTIVE") // 'ACTIVE' | 'INACTIVE' | 'CANCELLED'
-  mode        String   @default("OFFLINE") // 'ONLINE' | 'OFFLINE' — Tentor Jadwal mockup
-  location    String?  // free-text, e.g. "Cabang Sudirman"; only meaningful when mode=OFFLINE
+  status      String    @default("ACTIVE") // 'ACTIVE' | 'INACTIVE' | 'CANCELLED'
+  mode        String    @default("OFFLINE") // 'ONLINE' | 'OFFLINE' — Tentor Jadwal mockup
+  location    String? // free-text, e.g. "Cabang Sudirman"; only meaningful when mode=OFFLINE
   notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isPattern   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  tutor Tutor @relation(fields: [tutorId], references: [id], onDelete: Cascade)
-  class Class? @relation(fields: [classId], references: [id], onDelete: SetNull)
-  student Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
-  subject Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
-  program Program? @relation(fields: [programId], references: [id], onDelete: SetNull)
+  tutor    Tutor?            @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  class    Class?            @relation(fields: [classId], references: [id], onDelete: SetNull)
+  student  Student?          @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  subject  Subject?          @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  program  Program?          @relation(fields: [programId], references: [id], onDelete: SetNull)
   sessions TeachingSession[]
 
   @@index([tutorId])
@@ -255,42 +270,45 @@ model Schedule {
 // ============================================
 
 model TeachingSession {
-  id                   String   @id @default(uuid())
-  scheduleId           String?
-  tutorId              String
-  sessionType          String   // 'REGULAR' | 'PRIVATE'
-  sessionDate          DateTime
-  startTime            DateTime?
-  endTime              DateTime?
-  classId              String?
-  studentId            String?
-  subjectId            String?
-  programId            String?
-  mode                 String   @default("OFFLINE")
-  location             String?
-  status               String   @default("SCHEDULED")
-  honorRateSnapshot    Decimal? // IMMUTABLE - Snapshot at completion time
-  material             String?
-  teachingNotes        String?
-  progressNotes        String?
-  score                Decimal?
-  notes                String?
-  completedAt          DateTime?
-  createdBy            String?
-  createdAt            DateTime @default(now())
-  updatedBy            String?
-  updatedAt            DateTime @updatedAt
+  id                    String    @id @default(uuid())
+  scheduleId            String?
+  patternOccurrenceDate DateTime?
+  tutorId               String
+  sessionType           String // 'REGULAR' | 'PRIVATE'
+  sessionDate           DateTime
+  startTime             DateTime?
+  endTime               DateTime?
+  classId               String?
+  studentId             String?
+  subjectId             String?
+  programId             String?
+  mode                  String    @default("OFFLINE")
+  location              String?
+  status                String    @default("SCHEDULED")
+  honorRateSnapshot     Decimal? // IMMUTABLE - Snapshot at completion time
+  material              String?
+  teachingNotes         String?
+  progressNotes         String?
+  score                 Decimal?
+  notes                 String?
+  completedAt           DateTime?
+  createdBy             String?
+  createdAt             DateTime  @default(now())
+  updatedBy             String?
+  updatedAt             DateTime  @updatedAt
 
-  schedule Schedule? @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
-  tutor Tutor @relation(fields: [tutorId], references: [id], onDelete: Cascade)
-  class Class? @relation(fields: [classId], references: [id], onDelete: SetNull)
-  student Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
-  subject Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
-  program Program? @relation(fields: [programId], references: [id], onDelete: SetNull)
+  schedule          Schedule?               @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  tutor             Tutor                   @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  class             Class?                  @relation(fields: [classId], references: [id], onDelete: SetNull)
+  student           Student?                @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  subject           Subject?                @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  program           Program?                @relation(fields: [programId], references: [id], onDelete: SetNull)
   attendanceRecords AttendanceRecord[]
-  packageUsages PrivatePackageUsage[]
-  validations SessionValidation[]
+  packageUsages     PrivatePackageUsage[]
+  validations       SessionValidation[]
+  changeRequests    ScheduleChangeRequest[]
 
+  @@index([scheduleId, patternOccurrenceDate])
   @@index([tutorId])
   @@index([sessionDate])
   @@index([status])
@@ -299,18 +317,39 @@ model TeachingSession {
   @@index([programId])
 }
 
+model ScheduleChangeRequest {
+  id                String    @id @default(uuid())
+  teachingSessionId String
+  tutorId           String
+  proposedDate      DateTime
+  proposedStartTime DateTime
+  proposedEndTime   DateTime
+  reason            String
+  status            String    @default("PENDING")
+  reviewedAt        DateTime?
+  reviewedBy        String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  teachingSession TeachingSession @relation(fields: [teachingSessionId], references: [id], onDelete: Cascade)
+  tutor           Tutor           @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+
+  @@index([teachingSessionId, status])
+  @@index([tutorId, status])
+}
+
 // ============================================
 // 9. ATTENDANCE RECORDS (For Regular Classes)
 // ============================================
 
 model AttendanceRecord {
-  id              String   @id @default(uuid())
-  sessionId       String
-  studentId       String
-  status          String   // 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED'
-  notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id        String   @id @default(uuid())
+  sessionId String
+  studentId String
+  status    String // 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED'
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   session TeachingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
@@ -324,26 +363,26 @@ model AttendanceRecord {
 // ============================================
 
 model PrivatePackage {
-  id             String   @id @default(uuid())
+  id             String    @id @default(uuid())
   studentId      String
   programId      String?
-  quotaTotal     Int      @default(24)
-  quotaUsed      Int      @default(0)
-  quotaRemaining Int      @default(24) // Calculated: quotaTotal - quotaUsed
-  activationDate DateTime @default(now())
+  quotaTotal     Int       @default(24)
+  quotaUsed      Int       @default(0)
+  quotaRemaining Int       @default(24) // Calculated: quotaTotal - quotaUsed
+  activationDate DateTime  @default(now())
   expiryDate     DateTime?
-  status         String   @default("ACTIVE") // 'ACTIVE' | 'EXPIRED' | 'CANCELLED'
+  status         String    @default("ACTIVE") // 'ACTIVE' | 'EXPIRED' | 'CANCELLED'
   packageName    String?
   price          Decimal?
   paymentDate    DateTime?
   paymentMethod  String?
   notes          String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  program Program? @relation(fields: [programId], references: [id], onDelete: SetNull)
-  usages PrivatePackageUsage[]
+  student Student               @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  program Program?              @relation(fields: [programId], references: [id], onDelete: SetNull)
+  usages  PrivatePackageUsage[]
 
   @@index([studentId])
   @@index([status])
@@ -355,20 +394,20 @@ model PrivatePackage {
 // ============================================
 
 model PrivatePackageUsage {
-  id               String   @id @default(uuid())
-  packageId        String
+  id           String   @id @default(uuid())
+  packageId    String
   // Nullable: SESSION_COMPLETED entries are tied to a session, but
   // ADMIN_ADJUSTMENT entries (package activation, quota top-up) are not.
-  sessionId        String?
+  sessionId    String?
   // Signed ledger: positive = quota consumed, negative = quota credited
   // (top-up, initial activation grant, cancellation refund).
-  quantityUsed     Int      @default(1)
-  changeType       String   // 'SESSION_COMPLETED' | 'ADMIN_ADJUSTMENT' | 'CANCELLATION_REFUND'
-  changedBy        String?
-  changedAt        DateTime @default(now())
-  reason           String?
+  quantityUsed Int      @default(1)
+  changeType   String // 'SESSION_COMPLETED' | 'ADMIN_ADJUSTMENT' | 'CANCELLATION_REFUND'
+  changedBy    String?
+  changedAt    DateTime @default(now())
+  reason       String?
 
-  package PrivatePackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  package PrivatePackage   @relation(fields: [packageId], references: [id], onDelete: Cascade)
   session TeachingSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([packageId])
@@ -380,20 +419,21 @@ model PrivatePackageUsage {
 // ============================================
 
 model HonorRate {
-  id            String   @id @default(uuid())
-  sessionType   String   // 'REGULAR' | 'PRIVATE'
+  id            String    @id @default(uuid())
+  sessionType   String // 'REGULAR' | 'PRIVATE'
   subjectId     String?
   programId     String?
   nominal       Decimal
   effectiveFrom DateTime
   effectiveTo   DateTime?
-  status        String   @default("ACTIVE") // 'ACTIVE' | 'INACTIVE'
+  status        String    @default("ACTIVE") // 'ACTIVE' | 'INACTIVE'
   notes         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  program Program? @relation(fields: [programId], references: [id], onDelete: SetNull)
+  program Program?           @relation(fields: [programId], references: [id], onDelete: SetNull)
   history HonorRateHistory[]
+
   @@index([sessionType])
   @@index([programId])
   @@index([effectiveFrom])
@@ -405,13 +445,13 @@ model HonorRate {
 // ============================================
 
 model HonorRateHistory {
-  id          String   @id @default(uuid())
-  rateId      String
-  oldNominal  Decimal?
-  newNominal  Decimal
-  changedBy   String?
-  changedAt   DateTime @default(now())
-  reason      String?
+  id         String   @id @default(uuid())
+  rateId     String
+  oldNominal Decimal?
+  newNominal Decimal
+  changedBy  String?
+  changedAt  DateTime @default(now())
+  reason     String?
 
   rate HonorRate @relation(fields: [rateId], references: [id], onDelete: Cascade)
 
@@ -423,16 +463,16 @@ model HonorRateHistory {
 // ============================================
 
 model SessionValidation {
-  id              String   @id @default(uuid())
-  sessionId       String   @unique
-  caseType        String   // 'CANCELLATION_DAY_OF' | 'OVERDUE_COMPLETION' | 'MANUAL_CORRECTION' | 'DISPUTE'
-  decision        String   @default("PENDING") // 'APPROVED' | 'REJECTED' | 'PENDING' | 'NEED_MORE_INFO'
-  description     String
-  adminNotes      String?
-  createdBy       String?
-  createdAt       DateTime @default(now())
-  decidedBy       String?
-  decidedAt       DateTime?
+  id          String    @id @default(uuid())
+  sessionId   String    @unique
+  caseType    String // 'CANCELLATION_DAY_OF' | 'OVERDUE_COMPLETION' | 'MANUAL_CORRECTION' | 'DISPUTE'
+  decision    String    @default("PENDING") // 'APPROVED' | 'REJECTED' | 'PENDING' | 'NEED_MORE_INFO'
+  description String
+  adminNotes  String?
+  createdBy   String?
+  createdAt   DateTime  @default(now())
+  decidedBy   String?
+  decidedAt   DateTime?
 
   session TeachingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
@@ -445,15 +485,15 @@ model SessionValidation {
 // ============================================
 
 model AuditLog {
-  id         String   @id @default(uuid())
-  tableName  String
-  recordId   String
-  action     String   // 'INSERT' | 'UPDATE' | 'DELETE'
-  oldValues  Json?
-  newValues  Json?
-  changedBy  String?
-  changedAt  DateTime @default(now())
-  reason     String?
+  id        String   @id @default(uuid())
+  tableName String
+  recordId  String
+  action    String // 'INSERT' | 'UPDATE' | 'DELETE'
+  oldValues Json?
+  newValues Json?
+  changedBy String?
+  changedAt DateTime @default(now())
+  reason    String?
 
   @@index([tableName])
   @@index([recordId])

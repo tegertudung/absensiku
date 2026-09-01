@@ -1,84 +1,106 @@
-import { PrismaClient } from '@prisma/client';
-import bcrypt from 'bcryptjs';
+import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
 async function findOrCreateStudent(name: string) {
   const existing = await prisma.student.findFirst({ where: { name } });
   if (existing) return existing;
-  return prisma.student.create({ data: { name, status: 'ACTIVE' } });
+  return prisma.student.create({ data: { name, status: "ACTIVE" } });
 }
 
 async function main() {
-  console.log('🌱 Seeding development data...\n');
+  console.log("🌱 Seeding development data...\n");
 
   // --- Subject & Class ---
   const subject = await prisma.subject.upsert({
-    where: { name: 'Matematika' },
+    where: { name: "Matematika" },
     update: {},
-    create: { name: 'Matematika', description: 'Pelajaran Matematika' },
+    create: { name: "Matematika", description: "Pelajaran Matematika" },
   });
+  const regularProgram = await prisma.program.findUnique({
+    where: { code: "REGULAR" },
+  });
+  if (!regularProgram)
+    throw new Error(
+      "Program REGULAR belum tersedia. Jalankan migration terlebih dahulu.",
+    );
 
   const kelas = await prisma.class.upsert({
-    where: { name: 'Kelas 7A' },
+    where: { name: "Kelas 7A" },
     update: {},
-    create: { name: 'Kelas 7A', level: 'SMP', subjectId: subject.id, maxStudents: 20 },
+    create: {
+      name: "Kelas 7A",
+      level: "SMP",
+      programId: regularProgram.id,
+      quotaTotal: regularProgram.defaultMeetingQuota,
+      quotaRemaining: regularProgram.defaultMeetingQuota,
+    },
   });
 
   // --- Tutor (user + profile) ---
-  const tutorEmail = 'tentor1@pionerclass.com';
-  const tutorPassword = 'tentor123';
+  const tutorEmail = "tentor1@pionerclass.com";
+  const tutorPassword = "tentor123";
 
-  let tutorUser = await prisma.user.findUnique({ where: { email: tutorEmail } });
+  let tutorUser = await prisma.user.findUnique({
+    where: { email: tutorEmail },
+  });
   if (!tutorUser) {
     const passwordHash = await bcrypt.hash(tutorPassword, 10);
     tutorUser = await prisma.user.create({
-      data: { email: tutorEmail, passwordHash, role: 'TENTOR', isActive: true },
+      data: { email: tutorEmail, passwordHash, role: "TENTOR", isActive: true },
     });
   }
 
-  let tutor = await prisma.tutor.findUnique({ where: { userId: tutorUser.id } });
+  let tutor = await prisma.tutor.findUnique({
+    where: { userId: tutorUser.id },
+  });
   if (!tutor) {
     tutor = await prisma.tutor.create({
-      data: { userId: tutorUser.id, name: 'Budi Tentor', email: tutorEmail, status: 'ACTIVE' },
+      data: {
+        userId: tutorUser.id,
+        name: "Budi Tentor",
+        email: tutorEmail,
+        status: "ACTIVE",
+      },
     });
   }
 
   // --- Student ---
-  const student = await findOrCreateStudent('Siswa Contoh');
+  const student = await findOrCreateStudent("Siswa Contoh");
 
   // --- Honor rates (BR-08) ---
   const regularRate = await prisma.honorRate.findFirst({
-    where: { sessionType: 'REGULAR', status: 'ACTIVE' },
+    where: { sessionType: "REGULAR", status: "ACTIVE" },
   });
   if (!regularRate) {
     await prisma.honorRate.create({
       data: {
-        sessionType: 'REGULAR',
+        sessionType: "REGULAR",
         nominal: 100000,
-        effectiveFrom: new Date('2026-01-01'),
-        status: 'ACTIVE',
+        effectiveFrom: new Date("2026-01-01"),
+        status: "ACTIVE",
       },
     });
   }
 
   const privateRate = await prisma.honorRate.findFirst({
-    where: { sessionType: 'PRIVATE', status: 'ACTIVE' },
+    where: { sessionType: "PRIVATE", status: "ACTIVE" },
   });
   if (!privateRate) {
     await prisma.honorRate.create({
       data: {
-        sessionType: 'PRIVATE',
+        sessionType: "PRIVATE",
         nominal: 150000,
-        effectiveFrom: new Date('2026-01-01'),
-        status: 'ACTIVE',
+        effectiveFrom: new Date("2026-01-01"),
+        status: "ACTIVE",
       },
     });
   }
 
   // --- Private package (BR-02: 24 sessions) ---
   let pkg = await prisma.privatePackage.findFirst({
-    where: { studentId: student.id, status: 'ACTIVE' },
+    where: { studentId: student.id, status: "ACTIVE" },
   });
   if (!pkg) {
     pkg = await prisma.privatePackage.create({
@@ -87,56 +109,56 @@ async function main() {
         quotaTotal: 24,
         quotaUsed: 0,
         quotaRemaining: 24,
-        status: 'ACTIVE',
-        packageName: 'Paket 24 Sesi',
+        status: "ACTIVE",
+        packageName: "Paket 24 Sesi",
       },
     });
   }
 
   // --- Schedules (regular + private) ---
   let regularSchedule = await prisma.schedule.findFirst({
-    where: { tutorId: tutor.id, sessionType: 'REGULAR', classId: kelas.id },
+    where: { tutorId: tutor.id, sessionType: "REGULAR", classId: kelas.id },
   });
   if (!regularSchedule) {
     regularSchedule = await prisma.schedule.create({
       data: {
         tutorId: tutor.id,
-        sessionType: 'REGULAR',
+        sessionType: "REGULAR",
         classId: kelas.id,
         subjectId: subject.id,
         dayOfWeek: 1,
-        startTime: new Date('2026-01-01T09:00:00'),
-        endTime: new Date('2026-01-01T10:30:00'),
-        startDate: new Date('2026-01-01'),
-        status: 'ACTIVE',
+        startTime: new Date("2026-01-01T09:00:00"),
+        endTime: new Date("2026-01-01T10:30:00"),
+        startDate: new Date("2026-01-01"),
+        status: "ACTIVE",
       },
     });
   }
 
   let privateSchedule = await prisma.schedule.findFirst({
-    where: { tutorId: tutor.id, sessionType: 'PRIVATE', studentId: student.id },
+    where: { tutorId: tutor.id, sessionType: "PRIVATE", studentId: student.id },
   });
   if (!privateSchedule) {
     privateSchedule = await prisma.schedule.create({
       data: {
         tutorId: tutor.id,
-        sessionType: 'PRIVATE',
+        sessionType: "PRIVATE",
         studentId: student.id,
         subjectId: subject.id,
         dayOfWeek: 3,
-        startTime: new Date('2026-01-01T14:00:00'),
-        endTime: new Date('2026-01-01T15:30:00'),
-        startDate: new Date('2026-01-01'),
-        status: 'ACTIVE',
+        startTime: new Date("2026-01-01T14:00:00"),
+        endTime: new Date("2026-01-01T15:30:00"),
+        startDate: new Date("2026-01-01"),
+        status: "ACTIVE",
       },
     });
   }
 
-  console.log('✓ Seed complete!\n');
-  console.log('Login sebagai tentor untuk testing:');
+  console.log("✓ Seed complete!\n");
+  console.log("Login sebagai tentor untuk testing:");
   console.log(`  email:    ${tutorEmail}`);
   console.log(`  password: ${tutorPassword}\n`);
-  console.log('IDs untuk testing endpoint sessions:');
+  console.log("IDs untuk testing endpoint sessions:");
   console.table({
     regularScheduleId: regularSchedule.id,
     privateScheduleId: privateSchedule.id,
@@ -147,7 +169,7 @@ async function main() {
 
 main()
   .catch((e) => {
-    console.error('Seed failed:', e);
+    console.error("Seed failed:", e);
     process.exit(1);
   })
   .finally(async () => {

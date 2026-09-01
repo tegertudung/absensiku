@@ -1,12 +1,18 @@
 import { prisma } from '../utils/prisma';
 import { AppError } from '../utils/errors';
 
-/** Throws 403 if the given student isn't one of this parent's linked children. */
-async function assertOwnsChild(parentId: string, studentId: string) {
+/**
+ * Resolves a child only through the ParentStudent mapping.  This is the
+ * server-side boundary for every parent endpoint that accepts a student id.
+ * A missing link deliberately has the same response as a missing student so
+ * a parent cannot use this endpoint to discover other students.
+ */
+export async function assertParentOwnsStudent(parentId: string, studentId: string) {
   const link = await prisma.parentStudent.findUnique({
     where: { parentId_studentId: { parentId, studentId } },
   });
-  if (!link) throw new AppError('Anda tidak memiliki akses ke data siswa ini', 403);
+  if (!link) throw new AppError('Data siswa tidak ditemukan.', 404);
+  return link;
 }
 
 /**
@@ -67,12 +73,19 @@ export async function listChildrenForParent(parentId: string) {
  * TeachingSession reguler tercatat per-kelas bukan per-siswa — lihat catatan
  * yang sama di halaman detail siswa admin).
  */
-export async function getChildProgress(parentId: string, studentId: string) {
-  await assertOwnsChild(parentId, studentId);
+export async function getChildProgress(parentId: string, studentId: string, date?: Date) {
+  await assertParentOwnsStudent(parentId, studentId);
+
+  const dayRange = date
+    ? {
+        gte: date,
+        lt: new Date(date.getTime() + 24 * 60 * 60 * 1000),
+      }
+    : undefined;
 
   const [privateSessions, attendanceRecords] = await Promise.all([
     prisma.teachingSession.findMany({
-      where: { studentId, sessionType: 'PRIVATE', status: 'COMPLETED' },
+      where: { studentId, sessionType: 'PRIVATE', status: 'COMPLETED', ...(dayRange ? { sessionDate: dayRange } : {}) },
       include: { tutor: { select: { name: true } }, subject: { select: { name: true } } },
       orderBy: { sessionDate: 'desc' },
       take: 50,
@@ -81,7 +94,13 @@ export async function getChildProgress(parentId: string, studentId: string) {
       // Filtered to COMPLETED sessions here (not after fetching) — doing it
       // in JS after `take: 50` could silently drop real completed records
       // behind a recent run of SCHEDULED/IN_PROGRESS/PENDING_ADMIN ones.
-      where: { studentId, session: { status: 'COMPLETED' } },
+      where: {
+        studentId,
+        session: {
+          status: 'COMPLETED',
+          ...(dayRange ? { sessionDate: dayRange } : {}),
+        },
+      },
       include: {
         session: {
           include: {
@@ -102,6 +121,10 @@ export async function getChildProgress(parentId: string, studentId: string) {
       sessionDate: s.sessionDate,
       tutorName: s.tutor.name,
       subjectName: s.subject?.name ?? null,
+      startTime: s.startTime,
+      endTime: s.endTime,
+      mode: s.mode,
+      location: s.location,
       material: s.material,
       progressNotes: s.progressNotes,
       score: s.score,

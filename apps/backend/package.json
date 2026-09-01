@@ -12,7 +12,8 @@
     "type-check": "tsc --noEmit",
     "lint": "eslint src --ext .ts || true",
     "format": "prettier --write 'src/**/*.ts' || true",
-    "test:settings-phase1": "cross-env DOTENV_CONFIG_PATH=.env ts-node -r dotenv/config scripts/test-settings-phase1.ts"
+    "test:settings-phase1": "cross-env DOTENV_CONFIG_PATH=.env ts-node -r dotenv/config scripts/test-settings-phase1.ts",
+    "reset:dev-data": "cross-env DOTENV_CONFIG_PATH=.env ts-node -r dotenv/config scripts/reset-dev-data.ts --execute"
   },
   "prisma": {
     "seed": "cross-env DOTENV_CONFIG_PATH=.env ts-node -r dotenv/config prisma/seed.ts"

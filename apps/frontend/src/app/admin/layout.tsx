@@ -6,6 +6,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import RequireAuth from '@/components/RequireAuth';
 import { useAuthStore } from '@/store/authStore';
 import api from '@/lib/api';
+import { assetUrl } from '@/lib/api';
+import { useSystemIdentityStore } from '@/store/systemIdentityStore';
 import {
   IconDashboard,
   IconStudent,
@@ -59,6 +61,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const user = useAuthStore((s) => s.user);
   const [pendingCount, setPendingCount] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const identity = useSystemIdentityStore((state) => state.identity);
+  const loadIdentity = useSystemIdentityStore((state) => state.load);
   const pageContext = PAGE_CONTEXT[pathname] || (pathname.startsWith('/admin/students/') ? 'Detail Siswa' : 'Admin');
 
   useEffect(() => {
@@ -67,6 +71,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       .then((res) => setPendingCount(res.data.data.pendingValidationsCount))
       .catch(() => {});
   }, [pathname]);
+  useEffect(() => { loadIdentity(); }, [loadIdentity]);
 
   // Close the mobile drawer automatically whenever the route changes.
   useEffect(() => {
@@ -141,10 +146,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         {/* Desktop sidebar — static, always visible from md breakpoint up */}
         <aside className="hidden md:flex md:w-64 bg-navy-900 flex-col shrink-0">
           <div className="px-5 py-5 border-b border-white/10 flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-white text-sm font-bold ring-1 ring-white/10">
-              P
-            </div>
-            <p className="font-semibold tracking-tight text-white">Pioner Class</p>
+            <BrandMark logoPath={identity.logoPath} />
+            <p className="font-semibold tracking-tight text-white">{identity.systemName}</p>
           </div>
           {navList}
           {accountFooter}
@@ -157,10 +160,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <aside className="absolute left-0 top-0 bottom-0 w-64 bg-navy-900 flex flex-col shadow-xl">
               <div className="px-5 py-5 border-b border-white/10 flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-white text-sm font-bold">
-                    P
-                  </div>
-                  <p className="font-semibold text-white">Pioner Class</p>
+                  <BrandMark logoPath={identity.logoPath} />
+                  <p className="font-semibold text-white">{identity.systemName}</p>
                 </div>
                 <button
                   onClick={() => setMobileNavOpen(false)}
@@ -209,4 +210,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       </div>
     </RequireAuth>
   );
+}
+
+function BrandMark({ logoPath }: { logoPath: string }) {
+  const logo = assetUrl(logoPath);
+  return <div className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-white/10 text-sm font-bold text-white ring-1 ring-white/10">P{logo && <img src={logo} alt="Logo sistem" className="absolute inset-0 h-full w-full object-cover" onError={(event) => { event.currentTarget.style.display = 'none'; }} />}</div>;
 }

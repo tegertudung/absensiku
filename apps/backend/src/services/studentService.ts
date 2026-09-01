@@ -1,6 +1,6 @@
-import { prisma } from '../utils/prisma';
-import { AppError } from '../utils/errors';
-import { logAudit } from '../utils/auditLog';
+import { prisma } from "../utils/prisma";
+import { AppError } from "../utils/errors";
+import { logAudit } from "../utils/auditLog";
 
 export async function createStudent(data: {
   name: string;
@@ -9,44 +9,69 @@ export async function createStudent(data: {
   guardianName?: string;
   guardianPhone?: string;
 }) {
-  return prisma.student.create({ data: { ...data, status: 'ACTIVE' } });
+  return prisma.student.create({ data: { ...data, status: "ACTIVE" } });
 }
 
 export async function listStudents() {
   const students = await prisma.student.findMany({
     include: {
       enrollments: {
-        where: { status: 'ACTIVE' },
-        include: { class: { select: { id: true, name: true, quotaTotal: true, quotaUsed: true, quotaRemaining: true } } },
-        orderBy: { enrollmentDate: 'asc' },
+        where: { status: "ACTIVE" },
+        include: {
+          class: {
+            select: {
+              id: true,
+              name: true,
+              quotaTotal: true,
+              quotaUsed: true,
+              quotaRemaining: true,
+            },
+          },
+        },
+        orderBy: { enrollmentDate: "asc" },
       },
       packages: {
-        where: { status: 'ACTIVE' },
-        select: { id: true, packageName: true, quotaTotal: true, quotaUsed: true, quotaRemaining: true, activationDate: true },
-        orderBy: { activationDate: 'asc' },
+        where: { status: "ACTIVE" },
+        select: {
+          id: true,
+          packageName: true,
+          quotaTotal: true,
+          quotaUsed: true,
+          quotaRemaining: true,
+          activationDate: true,
+        },
+        orderBy: { activationDate: "asc" },
       },
       _count: {
-        select: { enrollments: true, packages: true, schedules: true, sessions: true },
+        select: {
+          enrollments: true,
+          packages: true,
+          schedules: true,
+          sessions: true,
+        },
       },
     },
-    orderBy: { name: 'asc' },
+    orderBy: { name: "asc" },
   });
 
   return students.map(({ enrollments, packages, _count, ...student }) => ({
     ...student,
     hasOperationalHistory:
-      _count.enrollments > 0 || _count.packages > 0 || _count.schedules > 0 || _count.sessions > 0,
+      _count.enrollments > 0 ||
+      _count.packages > 0 ||
+      _count.schedules > 0 ||
+      _count.sessions > 0,
     programs: [
       ...enrollments.map((enrollment) => ({
-        type: 'REGULAR' as const,
+        type: "REGULAR" as const,
         label: enrollment.class.name,
         quotaTotal: enrollment.class.quotaTotal,
         quotaUsed: enrollment.class.quotaUsed,
         quotaRemaining: enrollment.class.quotaRemaining,
       })),
       ...packages.map((pkg) => ({
-        type: 'PRIVATE' as const,
-        label: pkg.packageName || 'Paket Privat',
+        type: "PRIVATE" as const,
+        label: pkg.packageName || "Paket Privat",
         quotaTotal: pkg.quotaTotal,
         quotaUsed: pkg.quotaUsed,
         quotaRemaining: pkg.quotaRemaining,
@@ -67,11 +92,16 @@ export async function deleteStudentPermanently(id: string, adminId: string) {
       where: { id },
       include: {
         _count: {
-          select: { enrollments: true, packages: true, schedules: true, sessions: true },
+          select: {
+            enrollments: true,
+            packages: true,
+            schedules: true,
+            sessions: true,
+          },
         },
       },
     });
-    if (!student) throw new AppError('Siswa tidak ditemukan', 404);
+    if (!student) throw new AppError("Siswa tidak ditemukan", 404);
 
     // AttendanceRecord stores studentId without a database FK. Clear both
     // regular attendance rows for this student and any private-session rows
@@ -80,15 +110,21 @@ export async function deleteStudentPermanently(id: string, adminId: string) {
 
     // Delete student-specific private sessions first. Their SessionValidation,
     // AttendanceRecord, and PrivatePackageUsage children are cascade-linked.
-    await tx.teachingSession.deleteMany({ where: { studentId: id, sessionType: 'PRIVATE' } });
+    await tx.teachingSession.deleteMany({
+      where: { studentId: id, sessionType: "PRIVATE" },
+    });
 
     // Private schedules belong to the individual student; deleting them also
     // clears any remaining schedule-owned sessions through the schema cascade.
-    await tx.schedule.deleteMany({ where: { studentId: id, sessionType: 'PRIVATE' } });
+    await tx.schedule.deleteMany({
+      where: { studentId: id, sessionType: "PRIVATE" },
+    });
 
     // Package usage is an auditable package ledger, but it is owned by this
     // student's packages and must not survive a deliberate hard delete.
-    await tx.privatePackageUsage.deleteMany({ where: { package: { studentId: id } } });
+    await tx.privatePackageUsage.deleteMany({
+      where: { package: { studentId: id } },
+    });
     await tx.privatePackage.deleteMany({ where: { studentId: id } });
 
     // Remove membership only; never delete the shared regular class, quota,
@@ -98,10 +134,14 @@ export async function deleteStudentPermanently(id: string, adminId: string) {
     await tx.student.delete({ where: { id } });
     await tx.auditLog.create({
       data: {
-        tableName: 'students',
+        tableName: "students",
         recordId: id,
-        action: 'DELETE',
-        oldValues: { name: student.name, phone: student.phone, status: student.status },
+        action: "DELETE",
+        oldValues: {
+          name: student.name,
+          phone: student.phone,
+          status: student.status,
+        },
         changedBy: adminId,
         reason: `STUDENT_DELETED permanen; enrollments=${student._count.enrollments}, packages=${student._count.packages}, schedules=${student._count.schedules}, sessions=${student._count.sessions}`,
       },
@@ -115,41 +155,93 @@ export async function getStudentById(id: string) {
   const student = await prisma.student.findUnique({
     where: { id },
     include: {
-      packages: { orderBy: { activationDate: 'desc' } },
+      packages: { orderBy: { activationDate: "desc" } },
       enrollments: {
-        where: { status: 'ACTIVE' },
-        include: { class: { select: { name: true, level: true, quotaTotal: true, quotaRemaining: true } } },
-        orderBy: { enrollmentDate: 'asc' },
+        where: { status: "ACTIVE" },
+        include: {
+          class: {
+            select: {
+              id: true,
+              name: true,
+              level: true,
+              quotaTotal: true,
+              quotaRemaining: true,
+            },
+          },
+        },
+        orderBy: { enrollmentDate: "asc" },
       },
     },
   });
-  if (!student) throw new AppError('Siswa tidak ditemukan', 404);
+  if (!student) throw new AppError("Siswa tidak ditemukan", 404);
   return student;
 }
 
 export async function updateStudent(
   id: string,
-  data: Partial<{ name: string; phone: string; email: string; guardianName: string; guardianPhone: string }>
+  data: Partial<{
+    name: string;
+    phone: string;
+    email: string;
+    guardianName: string;
+    guardianPhone: string;
+    classId: string | null;
+  }>,
 ) {
   const student = await prisma.student.findUnique({ where: { id } });
-  if (!student) throw new AppError('Siswa tidak ditemukan', 404);
-  return prisma.student.update({ where: { id }, data });
+  if (!student) throw new AppError("Siswa tidak ditemukan", 404);
+  return prisma.$transaction(async (tx) => {
+    if (data.classId !== undefined) {
+      if (data.classId) {
+        const kelas = await tx.class.findFirst({
+          where: { id: data.classId, status: "ACTIVE" },
+        });
+        if (!kelas)
+          throw new AppError("Kelas tidak ditemukan atau tidak aktif.", 404);
+      }
+      await tx.classEnrollment.updateMany({
+        where: { studentId: id, status: "ACTIVE" },
+        data: { status: "INACTIVE" },
+      });
+      if (data.classId) {
+        const prior = await tx.classEnrollment.findUnique({
+          where: {
+            classId_studentId: { classId: data.classId, studentId: id },
+          },
+        });
+        if (prior)
+          await tx.classEnrollment.update({
+            where: { id: prior.id },
+            data: { status: "ACTIVE" },
+          });
+        else
+          await tx.classEnrollment.create({
+            data: { classId: data.classId, studentId: id, status: "ACTIVE" },
+          });
+      }
+    }
+    const { classId: _classId, ...profile } = data;
+    return tx.student.update({ where: { id }, data: profile });
+  });
 }
 
 export async function setStudentStatus(
   id: string,
-  status: 'ACTIVE' | 'INACTIVE' | 'GRADUATED',
-  adminId: string
+  status: "ACTIVE" | "INACTIVE" | "GRADUATED",
+  adminId: string,
 ) {
   const student = await prisma.student.findUnique({ where: { id } });
-  if (!student) throw new AppError('Siswa tidak ditemukan', 404);
+  if (!student) throw new AppError("Siswa tidak ditemukan", 404);
 
-  const updated = await prisma.student.update({ where: { id }, data: { status } });
+  const updated = await prisma.student.update({
+    where: { id },
+    data: { status },
+  });
 
   await logAudit({
-    tableName: 'students',
+    tableName: "students",
     recordId: id,
-    action: 'UPDATE',
+    action: "UPDATE",
     oldValues: { status: student.status },
     newValues: { status: updated.status },
     changedBy: adminId,

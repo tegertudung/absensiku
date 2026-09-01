@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { requireAuth, requireRole } from '../middleware/auth';
 import { handleError } from '../utils/errors';
 import { resolveTutorIdForUser } from '../services/sessionService';
-import { getAdminDashboardSummary, getTutorDashboardSummary } from '../services/dashboardService';
+import { getAdminDashboardSummary, getAdminMonthlySummary, getTutorDashboardSummary } from '../services/dashboardService';
 
 const router = Router();
 
@@ -13,6 +13,16 @@ router.get('/admin', requireAuth, requireRole('ADMIN'), async (_req: Request, re
   } catch (err) {
     handleError(err, res);
   }
+});
+
+router.get('/admin/monthly', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
+  const year = Number(req.query.year);
+  const month = Number(req.query.month);
+  if (!Number.isInteger(year) || !Number.isInteger(month)) {
+    return res.status(400).json({ error: 'Validation error', message: 'Bulan dan tahun tidak valid.' });
+  }
+  try { res.json({ success: true, data: await getAdminMonthlySummary(year, month) }); }
+  catch (err) { handleError(err, res); }
 });
 
 // GET /api/dashboard/tentor

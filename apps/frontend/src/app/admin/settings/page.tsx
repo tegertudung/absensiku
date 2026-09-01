@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import api, { assetUrl } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";
 import Modal from "@/components/Modal";
+import { useSystemIdentityStore } from "@/store/systemIdentityStore";
 
 type Settings = Record<string, string>;
 type Program = {
@@ -33,6 +34,7 @@ const nav: [Tab, string][] = [
 ];
 
 export default function SettingsPage() {
+  const refreshIdentity = useSystemIdentityStore((state) => state.refresh);
   const [tab, setTab] = useState<Tab>("identity"),
     [settings, setSettings] = useState<Settings>(initial),
     [programs, setPrograms] = useState<Program[]>([]),
@@ -69,6 +71,7 @@ export default function SettingsPage() {
     try {
       const res = await api.patch(`/settings/${path}`, data);
       setSettings({ ...initial, ...res.data.data });
+      if (path === "identity") await refreshIdentity();
       setMessage("Pengaturan berhasil disimpan.");
     } catch (err: any) {
       setMessage(err.response?.data?.message || "Gagal menyimpan pengaturan.");
@@ -88,6 +91,7 @@ export default function SettingsPage() {
         headers: { "Content-Type": "multipart/form-data" },
       });
       setSettings({ ...initial, ...res.data.data });
+      if (kind === "logo") await refreshIdentity();
       setMessage(kind === "logo" ? "Logo berhasil diperbarui." : "Tanda tangan berhasil diperbarui.");
     } catch (err: any) {
       setMessage(err.response?.data?.message || "Gagal mengunggah gambar.");

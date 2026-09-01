@@ -1,8 +1,9 @@
-import { Router, Request, Response } from 'express';
-import { z } from 'zod';
-import { requireAuth, requireRole } from '../middleware/auth';
-import { handleError } from '../utils/errors';
-import { resolveTutorIdForUser } from '../services/sessionService';
+import { Router, Request, Response } from "express";
+import { z } from "zod";
+import { requireAuth, requireRole } from "../middleware/auth";
+import { handleError, AppError } from "../utils/errors";
+import { prisma } from "../utils/prisma";
+import { resolveTutorIdForUser } from "../services/sessionService";
 import {
   createSchedule,
   listSchedules,
@@ -10,12 +11,14 @@ import {
   updateSchedule,
   setScheduleStatus,
   findScheduleConflicts,
-} from '../services/scheduleService';
+} from "../services/scheduleService";
 
 const router = Router();
 
-const timeString = z.string().regex(/^\d{2}:\d{2}$/, 'Format jam harus HH:mm');
-const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format tanggal harus YYYY-MM-DD');
+const timeString = z.string().regex(/^\d{2}:\d{2}$/, "Format jam harus HH:mm");
+const dateString = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Format tanggal harus YYYY-MM-DD");
 
 function combineDateTime(baseDate: string, time: string): Date {
   return new Date(`${baseDate}T${time}:00`);
@@ -25,17 +28,21 @@ const createSchema = z.object({
   // Optional because a TENTOR-submitted "Tambah Privat" request is forced to
   // their own tutorId server-side and doesn't need to send one; ADMIN requests
   // still must supply it (enforced below, not by the schema).
-  tutorId: z.string().uuid('tutorId harus UUID valid').optional(),
-  sessionType: z.enum(['REGULAR', 'PRIVATE']),
+  tutorId: z.string().uuid("tutorId harus UUID valid").optional(),
+  sessionType: z.enum(["REGULAR", "PRIVATE"]),
   classId: z.string().uuid().optional(),
   studentId: z.string().uuid().optional(),
   subjectId: z.string().uuid().optional(),
-  dayOfWeek: z.number().int().min(0).max(6, 'dayOfWeek harus 0 (Minggu) sampai 6 (Sabtu)'),
+  dayOfWeek: z
+    .number()
+    .int()
+    .min(0)
+    .max(6, "dayOfWeek harus 0 (Minggu) sampai 6 (Sabtu)"),
   startTime: timeString,
   endTime: timeString,
   startDate: dateString,
   endDate: dateString.optional(),
-  mode: z.enum(['ONLINE', 'OFFLINE']).default('OFFLINE'),
+  mode: z.enum(["ONLINE", "OFFLINE"]).default("OFFLINE"),
   location: z.string().trim().max(255).optional(),
   notes: z.string().optional(),
 });
@@ -44,28 +51,37 @@ const createSchema = z.object({
 // TENTOR juga bisa membuat jadwal PRIVATE untuk siswanya sendiri (mockup "Tambah
 // Privat"); tutorId dipaksa ke akun tentor yang login, dan jenis jadwal dikunci ke
 // PRIVATE — pembuatan kelas REGULAR tetap admin-only karena terikat ke struktur kelas.
-router.post('/', requireAuth, async (req: Request, res: Response) => {
+router.post("/", requireAuth, async (req: Request, res: Response) => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten().fieldErrors });
+    return res.status(400).json({
+      error: "Validation error",
+      details: parsed.error.flatten().fieldErrors,
+    });
   }
 
   const d = parsed.data;
   let tutorId = d.tutorId;
 
-  if (req.user!.role === 'TENTOR') {
+  if (req.user!.role === "TENTOR") {
     const own = await resolveTutorIdForUser(req.user!.userId);
-    if (!own) return res.status(403).json({ error: 'Forbidden', message: 'Akun tentor tidak ditemukan' });
-    tutorId = own;
-    if (d.sessionType !== 'PRIVATE') {
+    if (!own)
       return res
         .status(403)
-        .json({ error: 'Forbidden', message: 'Tentor hanya dapat membuat jadwal privat' });
+        .json({ error: "Forbidden", message: "Akun tentor tidak ditemukan" });
+    tutorId = own;
+    if (d.sessionType !== "PRIVATE") {
+      return res.status(403).json({
+        error: "Forbidden",
+        message: "Tentor hanya dapat membuat jadwal privat",
+      });
     }
-  } else if (req.user!.role !== 'ADMIN') {
-    return res.status(403).json({ error: 'Forbidden' });
+  } else if (req.user!.role !== "ADMIN") {
+    return res.status(403).json({ error: "Forbidden" });
   } else if (!tutorId) {
-    return res.status(400).json({ error: 'Validation error', message: 'tutorId wajib diisi' });
+    return res
+      .status(400)
+      .json({ error: "Validation error", message: "tutorId wajib diisi" });
   }
 
   try {
@@ -100,55 +116,64 @@ const checkConflictsSchema = z.object({
 
 // POST /api/schedules/check-conflicts — pre-save "Jadwal Bentrok" check (mockup
 // "Tambah Privat" shows this inline before the user submits, not just after).
-router.post('/check-conflicts', requireAuth, async (req: Request, res: Response) => {
-  const parsed = checkConflictsSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten().fieldErrors });
-  }
-  const d = parsed.data;
+router.post(
+  "/check-conflicts",
+  requireAuth,
+  async (req: Request, res: Response) => {
+    const parsed = checkConflictsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+    const d = parsed.data;
 
-  let tutorId = d.tutorId;
-  if (req.user!.role === 'TENTOR') {
-    const own = await resolveTutorIdForUser(req.user!.userId);
-    if (!own) return res.json({ success: true, data: [] });
-    tutorId = own;
-  } else if (!tutorId) {
-    return res.status(400).json({ error: 'Validation error', message: 'tutorId wajib diisi' });
-  }
+    let tutorId = d.tutorId;
+    if (req.user!.role === "TENTOR") {
+      const own = await resolveTutorIdForUser(req.user!.userId);
+      if (!own) return res.json({ success: true, data: [] });
+      tutorId = own;
+    } else if (!tutorId) {
+      return res
+        .status(400)
+        .json({ error: "Validation error", message: "tutorId wajib diisi" });
+    }
 
-  try {
-    const conflicts = await findScheduleConflicts(
-      tutorId!,
-      d.dayOfWeek,
-      combineDateTime(d.startDate, d.startTime),
-      combineDateTime(d.startDate, d.endTime)
-    );
-    res.json({ success: true, data: conflicts });
-  } catch (err) {
-    handleError(err, res);
-  }
-});
+    try {
+      const conflicts = await findScheduleConflicts(
+        tutorId!,
+        d.dayOfWeek,
+        combineDateTime(d.startDate, d.startTime),
+        combineDateTime(d.startDate, d.endTime),
+      );
+      res.json({ success: true, data: conflicts });
+    } catch (err) {
+      handleError(err, res);
+    }
+  },
+);
 
 // GET /api/schedules — TENTOR scoped ke jadwal sendiri; ADMIN bisa filter bebas
-router.get('/', requireAuth, async (req: Request, res: Response) => {
+router.get("/", requireAuth, async (req: Request, res: Response) => {
   const { sessionType, status, classId, studentId, tutorId } = req.query;
 
   let scopedTutorId: string | undefined;
-  if (req.user!.role === 'TENTOR') {
+  if (req.user!.role === "TENTOR") {
     const own = await resolveTutorIdForUser(req.user!.userId);
     if (!own) return res.json({ success: true, data: [] });
     scopedTutorId = own;
   } else {
-    scopedTutorId = typeof tutorId === 'string' ? tutorId : undefined;
+    scopedTutorId = typeof tutorId === "string" ? tutorId : undefined;
   }
 
   try {
     const schedules = await listSchedules({
       tutorId: scopedTutorId,
-      sessionType: typeof sessionType === 'string' ? sessionType : undefined,
-      status: typeof status === 'string' ? status : undefined,
-      classId: typeof classId === 'string' ? classId : undefined,
-      studentId: typeof studentId === 'string' ? studentId : undefined,
+      sessionType: typeof sessionType === "string" ? sessionType : undefined,
+      status: typeof status === "string" ? status : undefined,
+      classId: typeof classId === "string" ? classId : undefined,
+      studentId: typeof studentId === "string" ? studentId : undefined,
     });
     res.json({ success: true, data: schedules });
   } catch (err) {
@@ -156,15 +181,429 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+const patternSlotSchema = z
+  .object({
+    dayOfWeek: z.number().int().min(0).max(6),
+    startTime: timeString,
+    endTime: timeString,
+  })
+  .refine((slot) => slot.startTime < slot.endTime, {
+    message: "Jam mulai harus sebelum jam selesai.",
+  });
+
+const patternSchema = z
+  .object({
+    slots: z
+      .array(patternSlotSchema)
+      .min(1, "Minimal satu hari jadwal diperlukan."),
+  })
+  .superRefine((data, ctx) => {
+    const keys = new Set<string>();
+    data.slots.forEach((slot, index) => {
+      const key = `${slot.dayOfWeek}-${slot.startTime}-${slot.endTime}`;
+      if (keys.has(key))
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["slots", index],
+          message: "Slot hari dan waktu tidak boleh duplikat.",
+        });
+      keys.add(key);
+    });
+  });
+
+// Patterns are deliberately separate from legacy recurring assignments. They
+// contain only class and time; Tutor/Subject are selected on TeachingSession.
+router.get("/patterns", requireAuth, async (_req: Request, res: Response) => {
+  try {
+    const patterns = await prisma.schedule.findMany({
+      where: { isPattern: true, sessionType: "REGULAR", status: "ACTIVE" },
+      include: { class: { select: { id: true, name: true, level: true } } },
+      orderBy: [{ classId: "asc" }, { dayOfWeek: "asc" }, { startTime: "asc" }],
+    });
+    res.json({ success: true, data: patterns });
+  } catch (err) {
+    handleError(err, res);
+  }
+});
+
+router.put(
+  "/patterns/:classId",
+  requireAuth,
+  requireRole("ADMIN"),
+  async (req: Request, res: Response) => {
+    const parsed = patternSchema.safeParse(req.body);
+    if (!parsed.success)
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        const kelas = await tx.class.findFirst({
+          where: { id: req.params.classId, status: "ACTIVE" },
+        });
+        if (!kelas)
+          throw new AppError("Kelas tidak ditemukan atau tidak aktif.", 404);
+        const existing = await tx.schedule.findMany({
+          where: { classId: kelas.id, isPattern: true },
+          select: { id: true, dayOfWeek: true, startTime: true, endTime: true },
+        });
+        const base = new Date("1970-01-01T00:00:00");
+        const wanted = new Map(
+          parsed.data.slots.map((slot) => [
+            `${slot.dayOfWeek}-${slot.startTime}-${slot.endTime}`,
+            slot,
+          ]),
+        );
+        for (const pattern of existing) {
+          const key = `${pattern.dayOfWeek}-${String(pattern.startTime.getHours()).padStart(2, "0")}:${String(pattern.startTime.getMinutes()).padStart(2, "0")}-${String(pattern.endTime.getHours()).padStart(2, "0")}:${String(pattern.endTime.getMinutes()).padStart(2, "0")}`;
+          if (wanted.has(key)) {
+            await tx.schedule.update({
+              where: { id: pattern.id },
+              data: { status: "ACTIVE" },
+            });
+            wanted.delete(key);
+            continue;
+          }
+          const hasSessions = await tx.teachingSession.count({
+            where: { scheduleId: pattern.id },
+          });
+          if (hasSessions)
+            await tx.schedule.update({
+              where: { id: pattern.id },
+              data: { status: "INACTIVE" },
+            });
+          else await tx.schedule.delete({ where: { id: pattern.id } });
+        }
+        for (const slot of wanted.values()) {
+          await tx.schedule.create({
+            data: {
+              classId: kelas.id,
+              sessionType: "REGULAR",
+              dayOfWeek: slot.dayOfWeek,
+              startTime: combineDateTime("1970-01-01", slot.startTime),
+              endTime: combineDateTime("1970-01-01", slot.endTime),
+              startDate: base,
+              status: "ACTIVE",
+              isPattern: true,
+            },
+          });
+        }
+        return tx.schedule.findMany({
+          where: { classId: kelas.id, isPattern: true },
+          include: { class: { select: { id: true, name: true } } },
+          orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
+        });
+      });
+      res.json({ success: true, data: result });
+    } catch (err) {
+      handleError(err, res);
+    }
+  },
+);
+
+const meetingSchema = z
+  .object({
+    sessionType: z.enum(["REGULAR", "PRIVATE"]),
+    classId: z.string().uuid().optional(),
+    studentId: z.string().uuid().optional(),
+    tutorId: z.string().uuid(),
+    subjectId: z.string().uuid(),
+    sessionDate: dateString,
+    startTime: timeString,
+    endTime: timeString,
+    mode: z.enum(["ONLINE", "OFFLINE"]).default("OFFLINE"),
+    location: z.string().trim().max(255).optional(),
+    patternId: z.string().uuid().optional(),
+    patternOccurrenceDate: dateString.optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.startTime >= data.endTime)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["endTime"],
+        message: "Jam selesai harus setelah jam mulai.",
+      });
+    if (data.sessionType === "REGULAR" && !data.classId)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["classId"],
+        message: "Kelas wajib dipilih.",
+      });
+    if (data.sessionType === "PRIVATE" && !data.studentId)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["studentId"],
+        message: "Siswa wajib dipilih.",
+      });
+  });
+
+async function assertMeetingConflicts(
+  data: z.infer<typeof meetingSchema>,
+  excludeId?: string,
+) {
+  const start = combineDateTime(data.sessionDate, data.startTime);
+  const end = combineDateTime(data.sessionDate, data.endTime);
+  const dayStart = new Date(`${data.sessionDate}T00:00:00`);
+  const dayEnd = new Date(`${data.sessionDate}T23:59:59.999`);
+  const overlap = {
+    sessionDate: { gte: dayStart, lte: dayEnd },
+    startTime: { lt: end },
+    endTime: { gt: start },
+    status: { notIn: ["CANCELLED", "CANCELLED_NOT_COUNTED"] },
+    ...(excludeId ? { id: { not: excludeId } } : {}),
+  };
+  if (
+    await prisma.teachingSession.findFirst({
+      where: { ...overlap, tutorId: data.tutorId },
+      select: { id: true },
+    })
+  )
+    throw new AppError(
+      "Tentor sudah memiliki pertemuan yang bertabrakan pada waktu tersebut.",
+      409,
+    );
+  if (
+    data.sessionType === "REGULAR" &&
+    (await prisma.teachingSession.findFirst({
+      where: { ...overlap, classId: data.classId },
+      select: { id: true },
+    }))
+  )
+    throw new AppError(
+      "Kelas sudah memiliki pertemuan yang bertabrakan pada waktu tersebut.",
+      409,
+    );
+  if (
+    data.sessionType === "PRIVATE" &&
+    (await prisma.teachingSession.findFirst({
+      where: { ...overlap, studentId: data.studentId },
+      select: { id: true },
+    }))
+  )
+    throw new AppError(
+      "Siswa sudah memiliki pertemuan privat yang bertabrakan pada waktu tersebut.",
+      409,
+    );
+}
+
+router.post(
+  "/meetings",
+  requireAuth,
+  requireRole("ADMIN"),
+  async (req: Request, res: Response) => {
+    const parsed = meetingSchema.safeParse(req.body);
+    if (!parsed.success)
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
+    try {
+      const data = parsed.data;
+      await assertMeetingConflicts(data);
+      const meeting = await prisma.$transaction(async (tx) => {
+        const [tutor, subject, program] = await Promise.all([
+          tx.tutor.findFirst({
+            where: {
+              id: data.tutorId,
+              status: "ACTIVE",
+              deletedAt: null,
+              user: { is: { isActive: true } },
+              subjects: { some: { subjectId: data.subjectId } },
+            },
+          }),
+          tx.subject.findFirst({
+            where: { id: data.subjectId, isActive: true },
+          }),
+          tx.program.findUnique({ where: { code: data.sessionType } }),
+        ]);
+        if (!tutor)
+          throw new AppError(
+            "Tentor tidak tersedia untuk mata pelajaran yang dipilih.",
+            422,
+          );
+        if (!subject)
+          throw new AppError(
+            "Mata pelajaran tidak ditemukan atau tidak aktif.",
+            404,
+          );
+        if (
+          data.sessionType === "REGULAR" &&
+          !(await tx.class.findFirst({
+            where: { id: data.classId, status: "ACTIVE" },
+          }))
+        )
+          throw new AppError("Kelas tidak ditemukan atau tidak aktif.", 404);
+        if (
+          data.sessionType === "PRIVATE" &&
+          !(await tx.student.findFirst({
+            where: { id: data.studentId, status: "ACTIVE" },
+          }))
+        )
+          throw new AppError("Siswa tidak ditemukan atau tidak aktif.", 404);
+        let patternOccurrenceDate: Date | null = null;
+        if (data.patternId || data.patternOccurrenceDate) {
+          if (
+            data.sessionType !== "REGULAR" ||
+            !data.patternId ||
+            !data.patternOccurrenceDate
+          )
+            throw new AppError("Referensi pola pertemuan tidak valid.", 422);
+          const pattern = await tx.schedule.findFirst({
+            where: {
+              id: data.patternId,
+              classId: data.classId,
+              isPattern: true,
+              sessionType: "REGULAR",
+              status: "ACTIVE",
+            },
+          });
+          const occurrence = new Date(`${data.patternOccurrenceDate}T00:00:00`);
+          if (!pattern || occurrence.getDay() !== pattern.dayOfWeek)
+            throw new AppError("Pola asal pertemuan tidak valid.", 422);
+          patternOccurrenceDate = occurrence;
+        }
+        return tx.teachingSession.create({
+          data: {
+            tutorId: data.tutorId,
+            scheduleId: data.patternId || null,
+            patternOccurrenceDate,
+            sessionType: data.sessionType,
+            sessionDate: new Date(`${data.sessionDate}T00:00:00`),
+            startTime: combineDateTime(data.sessionDate, data.startTime),
+            endTime: combineDateTime(data.sessionDate, data.endTime),
+            classId: data.sessionType === "REGULAR" ? data.classId : null,
+            studentId: data.sessionType === "PRIVATE" ? data.studentId : null,
+            subjectId: data.subjectId,
+            programId: program?.id,
+            mode: data.mode,
+            location: data.mode === "OFFLINE" ? data.location || null : null,
+            status: "SCHEDULED",
+            createdBy: req.user!.userId,
+          },
+          include: {
+            tutor: { select: { name: true } },
+            class: { select: { name: true } },
+            student: { select: { name: true } },
+            subject: { select: { name: true } },
+          },
+        });
+      });
+      res.status(201).json({ success: true, data: meeting });
+    } catch (err) {
+      handleError(err, res);
+    }
+  },
+);
+
+const updateMeetingSchema = z
+  .object({
+    tutorId: z.string().uuid(),
+    subjectId: z.string().uuid(),
+    sessionDate: dateString,
+    startTime: timeString,
+    endTime: timeString,
+    mode: z.enum(["ONLINE", "OFFLINE"]),
+    location: z.string().trim().max(255).optional(),
+  })
+  .refine((data) => data.startTime < data.endTime, {
+    message: "Jam selesai harus setelah jam mulai.",
+    path: ["endTime"],
+  });
+
+router.put(
+  "/meetings/:id",
+  requireAuth,
+  requireRole("ADMIN"),
+  async (req: Request, res: Response) => {
+    const parsed = updateMeetingSchema.safeParse(req.body);
+    if (!parsed.success)
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
+    try {
+      const current = await prisma.teachingSession.findUnique({
+        where: { id: req.params.id },
+      });
+      if (!current) throw new AppError("Pertemuan tidak ditemukan.", 404);
+      if (!["SCHEDULED", "IN_PROGRESS"].includes(current.status))
+        throw new AppError(
+          "Pertemuan yang sudah selesai atau dibatalkan tidak dapat diubah.",
+          409,
+        );
+      const data = parsed.data;
+      await assertMeetingConflicts(
+        {
+          ...data,
+          sessionType: current.sessionType as "REGULAR" | "PRIVATE",
+          classId: current.classId || undefined,
+          studentId: current.studentId || undefined,
+        },
+        current.id,
+      );
+      const [tutor, subject] = await Promise.all([
+        prisma.tutor.findFirst({
+          where: {
+            id: data.tutorId,
+            status: "ACTIVE",
+            deletedAt: null,
+            user: { is: { isActive: true } },
+            subjects: { some: { subjectId: data.subjectId } },
+          },
+        }),
+        prisma.subject.findFirst({
+          where: { id: data.subjectId, isActive: true },
+        }),
+      ]);
+      if (!tutor)
+        throw new AppError(
+          "Tentor tidak tersedia untuk mata pelajaran yang dipilih.",
+          422,
+        );
+      if (!subject)
+        throw new AppError(
+          "Mata pelajaran tidak ditemukan atau tidak aktif.",
+          404,
+        );
+      const result = await prisma.teachingSession.update({
+        where: { id: current.id },
+        data: {
+          tutorId: data.tutorId,
+          subjectId: data.subjectId,
+          sessionDate: new Date(`${data.sessionDate}T00:00:00`),
+          startTime: combineDateTime(data.sessionDate, data.startTime),
+          endTime: combineDateTime(data.sessionDate, data.endTime),
+          mode: data.mode,
+          location: data.mode === "OFFLINE" ? data.location || null : null,
+          updatedBy: req.user!.userId,
+        },
+        include: {
+          tutor: { select: { id: true, name: true } },
+          class: { select: { name: true } },
+          student: { select: { name: true } },
+          subject: { select: { name: true } },
+        },
+      });
+      res.json({ success: true, data: result });
+    } catch (err) {
+      handleError(err, res);
+    }
+  },
+);
+
 // GET /api/schedules/:id
-router.get('/:id', requireAuth, async (req: Request, res: Response) => {
+router.get("/:id", requireAuth, async (req: Request, res: Response) => {
   try {
     const schedule = await getScheduleById(req.params.id);
 
-    if (req.user!.role === 'TENTOR') {
+    if (req.user!.role === "TENTOR") {
       const own = await resolveTutorIdForUser(req.user!.userId);
       if (!own || schedule.tutorId !== own) {
-        return res.status(403).json({ error: 'Forbidden', message: 'Anda tidak memiliki akses ke jadwal ini' });
+        return res.status(403).json({
+          error: "Forbidden",
+          message: "Anda tidak memiliki akses ke jadwal ini",
+        });
       }
     }
 
@@ -180,7 +619,7 @@ const updateSchema = z.object({
   startTime: timeString.optional(),
   endTime: timeString.optional(),
   endDate: dateString.optional(),
-  mode: z.enum(['ONLINE', 'OFFLINE']).optional(),
+  mode: z.enum(["ONLINE", "OFFLINE"]).optional(),
   location: z.string().trim().max(255).optional(),
   notes: z.string().optional(),
   // Required only when a TENTOR submits this (enforced below, not by the
@@ -191,33 +630,29 @@ const updateSchema = z.object({
 // PUT /api/schedules/:id — ADMIN can edit any schedule freely. TENTOR can
 // edit their own ("Ajukan Perubahan Jadwal") with a required reason; it
 // takes effect immediately, same as "Tambah Privat" — no approval step.
-router.put('/:id', requireAuth, async (req: Request, res: Response) => {
+router.put("/:id", requireAuth, async (req: Request, res: Response) => {
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten().fieldErrors });
+    return res.status(400).json({
+      error: "Validation error",
+      details: parsed.error.flatten().fieldErrors,
+    });
   }
 
   const d = parsed.data;
   let meta: { changedBy: string; reason: string } | undefined;
 
-  if (req.user!.role === 'TENTOR') {
-    const own = await resolveTutorIdForUser(req.user!.userId);
-    if (!own) return res.status(403).json({ error: 'Forbidden', message: 'Akun tentor tidak ditemukan' });
-
-    const existing = await getScheduleById(req.params.id).catch(() => null);
-    if (!existing || existing.tutorId !== own) {
-      return res.status(403).json({ error: 'Forbidden', message: 'Anda tidak memiliki akses ke jadwal ini' });
-    }
-    if (!d.reason || d.reason.trim().length < 3) {
-      return res.status(400).json({ error: 'Validation error', message: 'Alasan perubahan wajib diisi (minimal 3 karakter)' });
-    }
-    meta = { changedBy: req.user!.userId, reason: d.reason.trim() };
-  } else if (req.user!.role !== 'ADMIN') {
-    return res.status(403).json({ error: 'Forbidden' });
+  if (req.user!.role === "TENTOR") {
+    return res.status(403).json({
+      error: "Forbidden",
+      message: "Tentor tidak dapat mengubah jadwal langsung. Ajukan perubahan pada pertemuan terkait.",
+    });
+  } else if (req.user!.role !== "ADMIN") {
+    return res.status(403).json({ error: "Forbidden" });
   }
 
   try {
-    const referenceDate = d.startDate ?? new Date().toISOString().split('T')[0];
+    const referenceDate = d.startDate ?? new Date().toISOString().split("T")[0];
     const data: Record<string, unknown> = {};
     if (d.notes !== undefined) data.notes = d.notes;
     if (d.mode !== undefined) data.mode = d.mode;
@@ -225,31 +660,49 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
     if (d.dayOfWeek !== undefined) data.dayOfWeek = d.dayOfWeek;
     if (d.startDate) data.startDate = new Date(d.startDate);
     if (d.endDate) data.endDate = new Date(d.endDate);
-    if (d.startTime) data.startTime = combineDateTime(referenceDate, d.startTime);
+    if (d.startTime)
+      data.startTime = combineDateTime(referenceDate, d.startTime);
     if (d.endTime) data.endTime = combineDateTime(referenceDate, d.endTime);
 
-    res.json({ success: true, data: await updateSchedule(req.params.id, data, meta) });
-  } catch (err) {
-    handleError(err, res);
-  }
-});
-
-const statusSchema = z.object({ status: z.enum(['ACTIVE', 'INACTIVE', 'CANCELLED']) });
-
-// PATCH /api/schedules/:id/status
-router.patch('/:id/status', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
-  const parsed = statusSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: 'Validation error', details: parsed.error.flatten().fieldErrors });
-  }
-  try {
     res.json({
       success: true,
-      data: await setScheduleStatus(req.params.id, parsed.data.status, req.user!.userId),
+      data: await updateSchedule(req.params.id, data, meta),
     });
   } catch (err) {
     handleError(err, res);
   }
 });
+
+const statusSchema = z.object({
+  status: z.enum(["ACTIVE", "INACTIVE", "CANCELLED"]),
+});
+
+// PATCH /api/schedules/:id/status
+router.patch(
+  "/:id/status",
+  requireAuth,
+  requireRole("ADMIN"),
+  async (req: Request, res: Response) => {
+    const parsed = statusSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+    try {
+      res.json({
+        success: true,
+        data: await setScheduleStatus(
+          req.params.id,
+          parsed.data.status,
+          req.user!.userId,
+        ),
+      });
+    } catch (err) {
+      handleError(err, res);
+    }
+  },
+);
 
 export default router;

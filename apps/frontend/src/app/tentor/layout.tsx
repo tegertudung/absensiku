@@ -1,11 +1,14 @@
 'use client';
 
+import { useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import RequireAuth from '@/components/RequireAuth';
 import NotificationBell from '@/components/NotificationBell';
 import { useAuthStore } from '@/store/authStore';
 import { IconHome, IconSchedule, IconReport, IconStudent, IconPlus } from '@/components/icons';
+import { assetUrl } from '@/lib/api';
+import { useSystemIdentityStore } from '@/store/systemIdentityStore';
 
 const NAV_ITEMS = [
   { href: '/tentor', label: 'Beranda', icon: IconHome },
@@ -19,6 +22,9 @@ export default function TentorLayout({ children }: { children: React.ReactNode }
   const router = useRouter();
   const logout = useAuthStore((s) => s.logout);
   const user = useAuthStore((s) => s.user);
+  const identity = useSystemIdentityStore((state) => state.identity);
+  const loadIdentity = useSystemIdentityStore((state) => state.load);
+  useEffect(() => { loadIdentity(); }, [loadIdentity]);
   const isPrivateScheduleForm = pathname === '/tentor/private/new';
 
   // Split nav items around the center FAB slot (Beranda, Jadwal | + | Rekap, Profil)
@@ -30,10 +36,8 @@ export default function TentorLayout({ children }: { children: React.ReactNode }
       <div className="min-h-screen bg-canvas flex flex-col">
         {!isPrivateScheduleForm && <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between sticky top-0 z-10">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded bg-navy-900 flex items-center justify-center text-white text-xs font-bold">
-              P
-            </div>
-            <p className="font-semibold text-gray-900">Pioneer Class</p>
+            <div className="relative flex h-7 w-7 items-center justify-center overflow-hidden rounded bg-navy-900 text-xs font-bold text-white">P{identity.logoPath && <img src={assetUrl(identity.logoPath) || undefined} alt="Logo sistem" className="absolute inset-0 h-full w-full object-cover" onError={(event) => { event.currentTarget.style.display = 'none'; }} />}</div>
+            <p className="font-semibold text-gray-900">{identity.systemName}</p>
           </div>
           <div className="flex items-center gap-3">
             <NotificationBell href="/tentor/notifications" />
