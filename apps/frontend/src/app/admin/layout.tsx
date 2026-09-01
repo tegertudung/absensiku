@@ -212,7 +212,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   );
 }
 
+// Static /public/logo.png ships with the app itself (no per-environment
+// upload needed — local and production are separate databases, so a
+// Settings-driven logo would need re-uploading in each). A logo set via
+// Admin > Pengaturan > Identitas Sistem still overrides it, drawn on top.
 function BrandMark({ logoPath }: { logoPath: string }) {
   const logo = assetUrl(logoPath);
-  return <div className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-white/10 text-sm font-bold text-white ring-1 ring-white/10">P{logo && <img src={logo} alt="Logo sistem" className="absolute inset-0 h-full w-full object-cover" onError={(event) => { event.currentTarget.style.display = 'none'; }} />}</div>;
+  return (
+    <div className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-white/10 ring-1 ring-white/10">
+      <img src="/logo.png" alt="Logo sistem" className="h-full w-full object-cover" />
+      {logo && <img src={logo} alt="Logo sistem" className="absolute inset-0 h-full w-full object-cover" onError={(event) => { event.currentTarget.style.display = 'none'; }} />}
+    </div>
+  );
 }
