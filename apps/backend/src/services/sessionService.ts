@@ -5,6 +5,7 @@ import { logAudit } from "../utils/auditLog";
 import { getProgramForSessionType } from "./programService";
 import { getSettings } from "./settingsService";
 import {
+  createNotification,
   notifyParentsOfStudent,
   notifyParentsOfClass,
 } from "./notificationService";
@@ -735,6 +736,22 @@ export async function reportCancellation(
   return validation;
 }
 
+const CANCEL_DAY_NAMES = [
+  "Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu",
+];
+const CANCEL_MONTH_NAMES = [
+  "Jan", "Feb", "Mar", "Apr", "Mei", "Jun",
+  "Jul", "Agu", "Sep", "Okt", "Nov", "Des",
+];
+// start/end are nullable on TeachingSession (older pattern-derived rows may
+// lack an explicit override) — the time range is omitted when either is unset.
+function formatCancelledWhen(sessionDate: Date, startTime: Date | null, endTime: Date | null): string {
+  const dateLabel = `${CANCEL_DAY_NAMES[sessionDate.getDay()]}, ${sessionDate.getDate()} ${CANCEL_MONTH_NAMES[sessionDate.getMonth()]} ${sessionDate.getFullYear()}`;
+  if (!startTime || !endTime) return dateLabel;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${dateLabel}, ${pad(startTime.getHours())}:${pad(startTime.getMinutes())}–${pad(endTime.getHours())}:${pad(endTime.getMinutes())}`;
+}
+
 /** Admin cancels a future/open meeting directly. No quota or honor is created. */
 export async function cancelScheduledSessionByAdmin(
   sessionId: string,
@@ -769,6 +786,26 @@ export async function cancelScheduledSessionByAdmin(
     changedBy: adminId,
     reason: `Pertemuan dibatalkan: ${reason}`,
   });
+
+  // Notifikasi Tentor: admin's own cancellation previously notified nobody
+  // (only a tentor-reported day-of cancellation notified parents, below).
+  if (session.tutorId) {
+    prisma.tutor
+      .findUnique({ where: { id: session.tutorId }, select: { userId: true } })
+      .then((tutor) => {
+        if (!tutor) return;
+        return createNotification({
+          userId: tutor.userId,
+          title: "Pertemuan Dibatalkan",
+          message: `${formatCancelledWhen(session.sessionDate, session.startTime, session.endTime)} — Alasan: ${reason}`,
+          type: "SCHEDULE_CHANGE",
+        });
+      })
+      .catch((err) =>
+        console.error("[notify] admin-cancel tutor notification failed:", err),
+      );
+  }
+
   return result;
 }
 

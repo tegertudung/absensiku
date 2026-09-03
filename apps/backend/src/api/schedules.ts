@@ -5,6 +5,7 @@ import { handleError, AppError } from "../utils/errors";
 import { prisma } from "../utils/prisma";
 import { logAudit } from "../utils/auditLog";
 import { resolveTutorIdForUser } from "../services/sessionService";
+import { createNotification } from "../services/notificationService";
 import {
   createSchedule,
   listSchedules,
@@ -23,6 +24,38 @@ const dateString = z
 
 function combineDateTime(baseDate: string, time: string): Date {
   return new Date(`${baseDate}T${time}:00`);
+}
+
+// Notifikasi Tentor (siklus Pertemuan): "when" formatters mirror the style
+// already used for schedule-pattern notifications (day name + time range),
+// just built from a one-off session date instead of a recurring dayOfWeek.
+// Fire-and-forget everywhere they're used (`.catch` + log) — a notification
+// failure must never fail the underlying meeting create/edit/cancel/delete.
+const MEETING_DAY_NAMES = [
+  "Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu",
+];
+const MEETING_MONTH_NAMES = [
+  "Jan", "Feb", "Mar", "Apr", "Mei", "Jun",
+  "Jul", "Agu", "Sep", "Okt", "Nov", "Des",
+];
+function formatMeetingWhen(sessionDate: string, startTime: string, endTime: string): string {
+  const d = new Date(`${sessionDate}T00:00:00`);
+  return `${MEETING_DAY_NAMES[d.getDay()]}, ${d.getDate()} ${MEETING_MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}, ${startTime}–${endTime}`;
+}
+// Same as above but from already-loaded DB Date columns (delete/cancel paths
+// read an existing record instead of a freshly-parsed request body). start/end
+// are nullable on TeachingSession (older pattern-derived rows may lack an
+// explicit override), so the time range is just omitted when either is unset.
+function formatMeetingWhenFromRecord(sessionDate: Date, startTime: Date | null, endTime: Date | null): string {
+  const dateLabel = `${MEETING_DAY_NAMES[sessionDate.getDay()]}, ${sessionDate.getDate()} ${MEETING_MONTH_NAMES[sessionDate.getMonth()]} ${sessionDate.getFullYear()}`;
+  if (!startTime || !endTime) return dateLabel;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${dateLabel}, ${pad(startTime.getHours())}:${pad(startTime.getMinutes())}–${pad(endTime.getHours())}:${pad(endTime.getMinutes())}`;
+}
+function notifyTutorOfMeeting(userId: string, title: string, when: string) {
+  createNotification({ userId, title, message: when, type: "SCHEDULE_CHANGE" }).catch((err) =>
+    console.error("[notify] meeting tutor notification failed:", err),
+  );
 }
 
 const createSchema = z.object({
@@ -402,6 +435,7 @@ router.post(
     try {
       const data = parsed.data;
       await assertMeetingConflicts(data);
+      let tutorUserId: string | undefined;
       const meeting = await prisma.$transaction(async (tx) => {
         const [tutor, subject, program] = await Promise.all([
           tx.tutor.findFirst({
@@ -423,6 +457,7 @@ router.post(
             "Tentor tidak tersedia untuk mata pelajaran yang dipilih.",
             422,
           );
+        tutorUserId = tutor.userId;
         if (!subject)
           throw new AppError(
             "Mata pelajaran tidak ditemukan atau tidak aktif.",
@@ -490,6 +525,13 @@ router.post(
           },
         });
       });
+      if (tutorUserId) {
+        notifyTutorOfMeeting(
+          tutorUserId,
+          "Pertemuan Baru Ditambahkan",
+          formatMeetingWhen(data.sessionDate, data.startTime, data.endTime),
+        );
+      }
       res.status(201).json({ success: true, data: meeting });
     } catch (err) {
       handleError(err, res);
@@ -586,6 +628,28 @@ router.put(
           subject: { select: { name: true } },
         },
       });
+
+      const when = formatMeetingWhen(data.sessionDate, data.startTime, data.endTime);
+      if (data.tutorId !== current.tutorId) {
+        // Reassigned to a different tentor — the old one needs to know it's
+        // no longer theirs just as much as the new one needs to know it is.
+        notifyTutorOfMeeting(tutor.userId, "Pertemuan Baru Ditugaskan", when);
+        const previousTutor = current.tutorId
+          ? await prisma.tutor.findUnique({
+              where: { id: current.tutorId },
+              select: { userId: true },
+            })
+          : null;
+        if (previousTutor)
+          notifyTutorOfMeeting(
+            previousTutor.userId,
+            "Pertemuan Dipindahkan ke Tentor Lain",
+            when,
+          );
+      } else {
+        notifyTutorOfMeeting(tutor.userId, "Jadwal Pertemuan Diubah", when);
+      }
+
       res.json({ success: true, data: result });
     } catch (err) {
       handleError(err, res);
@@ -625,6 +689,18 @@ router.delete(
         changedBy: req.user!.userId,
         reason: "Pertemuan dihapus oleh admin",
       });
+      if (meeting.tutorId) {
+        const tutor = await prisma.tutor.findUnique({
+          where: { id: meeting.tutorId },
+          select: { userId: true },
+        });
+        if (tutor)
+          notifyTutorOfMeeting(
+            tutor.userId,
+            "Pertemuan Dihapus",
+            formatMeetingWhenFromRecord(meeting.sessionDate, meeting.startTime, meeting.endTime),
+          );
+      }
       res.json({ success: true, data: { id: meeting.id } });
     } catch (err) {
       handleError(err, res);
