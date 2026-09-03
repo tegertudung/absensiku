@@ -295,9 +295,8 @@ export default function AdminLayout({
 function BrandMark({ logoPath }: { logoPath: string }) {
   const logo = assetUrl(logoPath);
   return (
-<<<<<<< HEAD
-    <div className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-white/10 text-sm font-bold text-white ring-1 ring-white/10">
-      P
+    <div className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-white/10 ring-1 ring-white/10">
+      <img src="/logo.png" alt="Logo sistem" className="h-full w-full object-cover" />
       {logo && (
         <img
           src={logo}
@@ -308,11 +307,6 @@ function BrandMark({ logoPath }: { logoPath: string }) {
           }}
         />
       )}
-=======
-    <div className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-white/10 ring-1 ring-white/10">
-      <img src="/logo.png" alt="Logo sistem" className="h-full w-full object-cover" />
-      {logo && <img src={logo} alt="Logo sistem" className="absolute inset-0 h-full w-full object-cover" onError={(event) => { event.currentTarget.style.display = 'none'; }} />}
->>>>>>> ed2bcc32bd072b0a48245cac4dbfc2ef1abb8c2f
     </div>
   );
 }
