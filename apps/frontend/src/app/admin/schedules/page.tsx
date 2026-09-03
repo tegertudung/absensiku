@@ -143,6 +143,8 @@ export default function AdminSchedulesPage() {
   const [cancelItem, setCancelItem] = useState<CalendarItem | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [deleteItem, setDeleteItem] = useState<CalendarItem | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [studentQuery, setStudentQuery] = useState("");
   const [tutorQuery, setTutorQuery] = useState("");
@@ -465,6 +467,23 @@ export default function AdminSchedulesPage() {
       setCancelling(false);
     }
   }
+  async function deleteMeeting() {
+    if (!deleteItem) return;
+    setDeleting(true);
+    setMutationError("");
+    try {
+      await api.delete(`/schedules/meetings/${deleteItem.id}`);
+      setDeleteItem(null);
+      setSelected(null);
+      await load();
+    } catch (error: any) {
+      setMutationError(
+        error.response?.data?.message || "Gagal menghapus pertemuan.",
+      );
+    } finally {
+      setDeleting(false);
+    }
+  }
   const selectedPatternSlots = patterns
     .filter((item) => item.classId === patternClassId)
     .map((item) => ({
@@ -629,6 +648,8 @@ export default function AdminSchedulesPage() {
                 choose={(item) =>
                   item.incomplete ? openMeeting(item) : setSelected(item)
                 }
+                onEdit={openEdit}
+                onDelete={setDeleteItem}
               />
             )}
             {!items.length && (
@@ -998,10 +1019,18 @@ export default function AdminSchedulesPage() {
                       setCancelReason("");
                       setCancelItem(selected);
                     }}
-                    className="text-sm text-red-600"
+                    className="mr-4 text-sm text-red-600"
                   >
                     Batalkan Pertemuan
                   </button>
+                  {selected.meeting && selected.status === "SCHEDULED" && (
+                    <button
+                      onClick={() => setDeleteItem(selected)}
+                      className="text-sm text-red-600"
+                    >
+                      Hapus Pertemuan
+                    </button>
+                  )}
                 </div>
               )}
           </div>
@@ -1051,6 +1080,40 @@ export default function AdminSchedulesPage() {
           </div>
         </Modal>
       )}
+      {deleteItem && (
+        <Modal
+          title="Hapus Pertemuan?"
+          onClose={() => !deleting && setDeleteItem(null)}
+        >
+          <div className="space-y-4 text-sm text-gray-600">
+            <p>
+              Pertemuan <strong>{deleteItem.label}</strong> pada{" "}
+              {new Intl.DateTimeFormat("id-ID", { dateStyle: "long" }).format(
+                deleteItem.date,
+              )}
+              , {deleteItem.start}–{deleteItem.end} akan dihapus permanen.
+              Tindakan ini tidak dapat dibatalkan.
+            </p>
+            {mutationError && <p className="text-red-600">{mutationError}</p>}
+            <div className="flex justify-end gap-2">
+              <button
+                disabled={deleting}
+                onClick={() => setDeleteItem(null)}
+                className="rounded border px-4 py-2"
+              >
+                Batal
+              </button>
+              <button
+                disabled={deleting}
+                onClick={deleteMeeting}
+                className="rounded bg-red-600 px-4 py-2 text-white disabled:opacity-60"
+              >
+                {deleting ? "Menghapus..." : "Hapus Pertemuan"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
       {dayDate && (
         <DayDrawer
           date={dayDate}
@@ -1059,6 +1122,7 @@ export default function AdminSchedulesPage() {
           onDetail={setSelected}
           onEdit={openEdit}
           onComplete={openMeeting}
+          onDelete={setDeleteItem}
         />
       )}
     </div>
@@ -1072,6 +1136,7 @@ function DayDrawer({
   onDetail,
   onEdit,
   onComplete,
+  onDelete,
 }: {
   date: Date;
   items: CalendarItem[];
@@ -1079,6 +1144,7 @@ function DayDrawer({
   onDetail: (item: CalendarItem) => void;
   onEdit: (item: CalendarItem) => void;
   onComplete: (item: CalendarItem) => void;
+  onDelete: (item: CalendarItem) => void;
 }) {
   const ordered = [...items].sort((a, b) => a.start.localeCompare(b.start));
   return (
@@ -1151,6 +1217,14 @@ function DayDrawer({
                         Edit
                       </button>
                     )}
+                  {item.meeting && item.status === "SCHEDULED" && (
+                    <button
+                      onClick={() => onDelete(item)}
+                      className="text-sm text-red-600 underline"
+                    >
+                      Hapus
+                    </button>
+                  )}
                 </div>
               </article>
             ))
@@ -1285,9 +1359,13 @@ function WeekGrid({
 function MeetingList({
   items,
   choose,
+  onEdit,
+  onDelete,
 }: {
   items: CalendarItem[];
   choose: (item: CalendarItem) => void;
+  onEdit: (item: CalendarItem) => void;
+  onDelete: (item: CalendarItem) => void;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -1323,12 +1401,33 @@ function MeetingList({
               <td>{item.tutor || "-"}</td>
               <td>{calendarStateLabel(item)}</td>
               <td>
-                <button
-                  onClick={() => choose(item)}
-                  className="text-navy-900 underline"
-                >
-                  {item.incomplete ? "Lengkapi" : "Detail"}
-                </button>
+                <div className="flex gap-3 text-xs font-medium">
+                  <button
+                    onClick={() => choose(item)}
+                    className="text-navy-900 hover:underline"
+                  >
+                    {item.incomplete ? "Lengkapi" : "Detail"}
+                  </button>
+                  {!item.incomplete &&
+                    !["COMPLETED", "CANCELLED"].includes(
+                      item.calendarState,
+                    ) && (
+                      <button
+                        onClick={() => onEdit(item)}
+                        className="text-gray-700 hover:underline"
+                      >
+                        Edit
+                      </button>
+                    )}
+                  {item.meeting && item.status === "SCHEDULED" && (
+                    <button
+                      onClick={() => onDelete(item)}
+                      className="text-red-600 hover:underline"
+                    >
+                      Hapus
+                    </button>
+                  )}
+                </div>
               </td>
             </tr>
           ))}

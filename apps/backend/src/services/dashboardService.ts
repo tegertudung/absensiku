@@ -52,6 +52,12 @@ export async function getAdminDashboardSummary() {
     }),
     prisma.tutor.count({ where: { status: "ACTIVE", deletedAt: null } }),
     prisma.student.count({ where: { status: "ACTIVE" } }),
+    // Sorted in JS below, not via `orderBy` on the `schedule` relation — Neon
+    // production hit a Postgres error ("WITHIN GROUP is required for
+    // ordered-set aggregate mode") on exactly this relation-orderBy shape
+    // that never reproduced locally, so it's avoided outright rather than
+    // chased further. Today's row count is small; sorting client-side after
+    // fetch is cheap and sidesteps the whole class of risk.
     prisma.teachingSession.findMany({
       where: { sessionDate: { gte: start, lt: end } },
       include: {
@@ -63,12 +69,6 @@ export async function getAdminDashboardSummary() {
       },
       orderBy: { createdAt: "asc" },
     }),
-    // Sorted in JS below, not via `orderBy` on the `schedule` relation — Neon
-    // production hit a Postgres error ("WITHIN GROUP is required for
-    // ordered-set aggregate mode") on exactly this relation-orderBy shape
-    // that never reproduced locally, so it's avoided outright rather than
-    // chased further. Today's row count is small; sorting client-side after
-    // fetch is cheap and sidesteps the whole class of risk.
     prisma.teachingSession.findMany({
       where: {
         status: "COMPLETED",

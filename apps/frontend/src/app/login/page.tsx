@@ -47,8 +47,8 @@ export default function LoginPage() {
     <main className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="w-14 h-14 rounded-xl bg-navy-900 text-white flex items-center justify-center text-xl font-bold mx-auto mb-4">
-            P
+          <div className="w-14 h-14 rounded-xl overflow-hidden mx-auto mb-4">
+            <img src="/logo.png" alt="Logo Pioner Class" className="h-full w-full object-cover" />
           </div>
           <p className="text-xs font-semibold tracking-widest text-navy-700">PIONEER CLASS</p>
           <h1 className="text-2xl font-semibold text-gray-900 mt-1">Halo!</h1>

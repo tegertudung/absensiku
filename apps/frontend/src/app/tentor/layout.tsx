@@ -36,7 +36,10 @@ export default function TentorLayout({ children }: { children: React.ReactNode }
       <div className="min-h-screen bg-canvas flex flex-col">
         {!isPrivateScheduleForm && <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between sticky top-0 z-10">
           <div className="flex items-center gap-2">
-            <div className="relative flex h-7 w-7 items-center justify-center overflow-hidden rounded bg-navy-900 text-xs font-bold text-white">P{identity.logoPath && <img src={assetUrl(identity.logoPath) || undefined} alt="Logo sistem" className="absolute inset-0 h-full w-full object-cover" onError={(event) => { event.currentTarget.style.display = 'none'; }} />}</div>
+            <div className="relative flex h-7 w-7 items-center justify-center overflow-hidden rounded bg-navy-900">
+              <img src="/logo.png" alt="Logo sistem" className="h-full w-full object-cover" />
+              {identity.logoPath && <img src={assetUrl(identity.logoPath) || undefined} alt="Logo sistem" className="absolute inset-0 h-full w-full object-cover" onError={(event) => { event.currentTarget.style.display = 'none'; }} />}
+            </div>
             <p className="font-semibold text-gray-900">{identity.systemName}</p>
           </div>
           <div className="flex items-center gap-3">

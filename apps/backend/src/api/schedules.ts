@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { handleError, AppError } from "../utils/errors";
 import { prisma } from "../utils/prisma";
+import { logAudit } from "../utils/auditLog";
 import { resolveTutorIdForUser } from "../services/sessionService";
 import {
   createSchedule,
@@ -586,6 +587,45 @@ router.put(
         },
       });
       res.json({ success: true, data: result });
+    } catch (err) {
+      handleError(err, res);
+    }
+  },
+);
+
+// DELETE /api/schedules/meetings/:id — only while still SCHEDULED (never
+// started). Once a tentor has opened it (IN_PROGRESS) or it's been acted
+// on, use "Batalkan Pertemuan" instead so the history/audit trail stays
+// intact — this is for cleaning up a meeting that was never touched.
+router.delete(
+  "/meetings/:id",
+  requireAuth,
+  requireRole("ADMIN"),
+  async (req: Request, res: Response) => {
+    try {
+      const meeting = await prisma.teachingSession.findUnique({
+        where: { id: req.params.id },
+      });
+      if (!meeting) throw new AppError("Pertemuan tidak ditemukan.", 404);
+      if (meeting.status !== "SCHEDULED")
+        throw new AppError(
+          'Hanya pertemuan berstatus "Terjadwal" yang dapat dihapus. Gunakan "Batalkan Pertemuan" untuk pertemuan yang sudah berjalan.',
+          409,
+        );
+      await prisma.teachingSession.delete({ where: { id: meeting.id } });
+      await logAudit({
+        tableName: "teaching_sessions",
+        recordId: meeting.id,
+        action: "DELETE",
+        oldValues: {
+          sessionType: meeting.sessionType,
+          sessionDate: meeting.sessionDate.toISOString(),
+          tutorId: meeting.tutorId,
+        },
+        changedBy: req.user!.userId,
+        reason: "Pertemuan dihapus oleh admin",
+      });
+      res.json({ success: true, data: { id: meeting.id } });
     } catch (err) {
       handleError(err, res);
     }
