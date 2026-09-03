@@ -1,79 +1,86 @@
 "use client";
-
 import { useCallback, useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
 import Modal from "@/components/Modal";
 import PageHeader from "@/components/PageHeader";
 import SectionCard from "@/components/SectionCard";
 import EmptyState from "@/components/EmptyState";
-import { formatRupiah, formatDate } from "@/lib/format";
+import { formatDate, formatRupiah } from "@/lib/format";
 import { IconPlus } from "@/components/icons";
-
-type Program = {
+type P = {
   id: string;
   code: string;
   name: string;
-  learningModel?: string;
-  isActive?: boolean;
+  learningModel: string;
+  usesQuota: boolean;
+  defaultMeetingQuota: number;
+  isActive: boolean;
 };
-type Rate = {
+type R = {
   id: string;
   sessionType: string;
   nominal: string;
   effectiveFrom: string;
   effectiveTo: string | null;
   status: string;
-  program?: Program | null;
+  program?: P | null;
 };
-type History = {
+type H = {
   id: string;
   oldNominal: string | null;
   newNominal: string;
   changedAt: string;
   reason?: string | null;
-  rate: { sessionType: string; program?: Program | null };
+  rate: { program?: P | null };
 };
-const label = (rate: Rate | History["rate"]) =>
-  rate.program?.name || (rate.sessionType === "PRIVATE" ? "Privat" : "Reguler");
-const model = (rate: Rate) =>
-  rate.program?.learningModel === "CLASS_BASED"
-    ? "Berbasis Kelas"
-    : rate.program?.learningModel === "INDIVIDUAL"
-      ? "Individual"
-      : "-";
-
+const core = (p: P) => p.code === "REGULAR" || p.code === "PRIVATE";
+const model = (p: P) =>
+  p.learningModel === "CLASS_BASED" ? "Berbasis Kelas" : "Individual";
+const empty = {
+  name: "",
+  code: "",
+  learningModel: "INDIVIDUAL",
+  usesQuota: true,
+  defaultMeetingQuota: "24",
+};
+const err = (e: any, f: string) =>
+  e.response?.data?.message ||
+  Object.values(e.response?.data?.details || {})
+    .flat()
+    .find(Boolean) ||
+  f;
 export default function AdminHonorRatesPage() {
-  const [rates, setRates] = useState<Rate[]>([]),
-    [programs, setPrograms] = useState<Program[]>([]),
-    [history, setHistory] = useState<History[]>([]),
+  const [programs, setPrograms] = useState<P[]>([]),
+    [rates, setRates] = useState<R[]>([]),
+    [history, setHistory] = useState<H[]>([]),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
-    [open, setOpen] = useState(false),
-    [saving, setSaving] = useState(false),
-    [detail, setDetail] = useState<Rate | null>(null),
+    [filter, setFilter] = useState(""),
     [menu, setMenu] = useState<string | null>(null),
-    [filter, setFilter] = useState("");
-  const [form, setForm] = useState({
-    programId: "",
-    sessionType: "REGULAR",
-    nominal: "",
-    effectiveFrom: "",
-    notes: "",
-  });
+    [programOpen, setProgramOpen] = useState(false),
+    [editing, setEditing] = useState<P | null>(null),
+    [detail, setDetail] = useState<P | null>(null),
+    [deactivate, setDeactivate] = useState<P | null>(null),
+    [deleting, setDeleting] = useState<P | null>(null),
+    [rateProgram, setRateProgram] = useState<P | null>(null),
+    [saving, setSaving] = useState(false),
+    [form, setForm] = useState(empty),
+    [rateForm, setRateForm] = useState({ nominal: "", effectiveFrom: "" });
   const load = useCallback(async () => {
     setLoading(true);
+    setError("");
     try {
-      const [a, b, c] = await Promise.all([
-        api.get("/honor-rates"),
+      const [p, r, h] = await Promise.all([
         api.get("/programs"),
+        api.get("/honor-rates"),
         api.get("/honor-rates/history"),
       ]);
-      setRates(a.data.data);
-      setPrograms(b.data.data);
-      setHistory(c.data.data);
-    } catch {
-      setError("Gagal memuat tarif honor.");
+      setPrograms(p.data.data);
+      setRates(r.data.data);
+      setHistory(h.data.data);
+    } catch (e: any) {
+      setError(err(e, "Gagal memuat data Program."));
     } finally {
       setLoading(false);
     }
@@ -82,95 +89,181 @@ export default function AdminHonorRatesPage() {
     load();
   }, [load]);
   const today = new Date();
+  const current = (p: P) =>
+    rates.find(
+      (r) =>
+        r.program?.id === p.id &&
+        r.status === "ACTIVE" &&
+        new Date(r.effectiveFrom) <= today &&
+        (!r.effectiveTo || new Date(r.effectiveTo) >= today),
+    );
+  const futures = (p: P) =>
+    rates.filter(
+      (r) =>
+        r.program?.id === p.id &&
+        r.status === "ACTIVE" &&
+        new Date(r.effectiveFrom) > today,
+    );
   const visible = useMemo(
-    () => rates.filter((r) => !filter || r.program?.id === filter),
-    [rates, filter],
+    () => programs.filter((p) => !filter || p.id === filter),
+    [programs, filter],
   );
-  const active = visible.filter(
+  const active = rates.filter(
     (r) =>
       r.status === "ACTIVE" &&
       new Date(r.effectiveFrom) <= today &&
       (!r.effectiveTo || new Date(r.effectiveTo) >= today),
   );
-  const future = visible.filter(
+  const future = rates.filter(
     (r) => r.status === "ACTIVE" && new Date(r.effectiveFrom) > today,
   );
-  async function save(e: React.FormEvent) {
-    e.preventDefault();
+  function open(p?: P) {
+    setProgramOpen(true);
+    setEditing(p || null);
+    setForm(
+      p
+        ? {
+            name: p.name,
+            code: p.code,
+            learningModel: p.learningModel,
+            usesQuota: p.usesQuota,
+            defaultMeetingQuota: String(p.defaultMeetingQuota),
+          }
+        : empty,
+    );
     setError("");
-    if (!form.programId || Number(form.nominal) <= 0 || !form.effectiveFrom) {
-      setError("Program, honor per sesi, dan tanggal berlaku wajib diisi.");
+  }
+  async function saveProgram(e: React.FormEvent) {
+    e.preventDefault();
+    const q = Number(form.defaultMeetingQuota);
+    if (
+      !form.name.trim() ||
+      (!editing && !form.code.trim()) ||
+      !Number.isInteger(q) ||
+      q < 1
+    ) {
+      setError(
+        "Nama, kode, dan kuota standar minimal 1 pertemuan wajib diisi.",
+      );
+      return;
+    }
+    setSaving(true);
+    try {
+      const data = {
+        name: form.name.trim(),
+        learningModel: form.learningModel,
+        usesQuota: form.usesQuota,
+        defaultMeetingQuota: q,
+      };
+      editing
+        ? await api.put(`/programs/${editing.id}`, data)
+        : await api.post("/programs", {
+            ...data,
+            code: form.code.trim().toUpperCase(),
+          });
+      setEditing(null);
+      setNotice("Program berhasil disimpan.");
+      await load();
+    } catch (e: any) {
+      setError(err(e, "Gagal menyimpan program."));
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function status(p: P) {
+    setSaving(true);
+    try {
+      await api.patch(`/programs/${p.id}/status`, { isActive: !p.isActive });
+      setDeactivate(null);
+      setNotice(
+        `Program berhasil ${p.isActive ? "dinonaktifkan" : "diaktifkan"}.`,
+      );
+      await load();
+    } catch (e: any) {
+      setError(err(e, "Gagal mengubah status program."));
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function remove(p: P) {
+    setSaving(true);
+    try {
+      await api.delete(`/programs/${p.id}`);
+      setDeleting(null);
+      setDetail(null);
+      setNotice("Program berhasil dihapus.");
+      await load();
+    } catch (e: any) {
+      setDeleting(null);
+      setError(
+        err(
+          e,
+          "Program tidak dapat dihapus karena sudah digunakan pada data operasional. Nonaktifkan program jika sudah tidak ingin digunakan.",
+        ),
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function saveRate(e: React.FormEvent) {
+    e.preventDefault();
+    if (
+      !rateProgram ||
+      Number(rateForm.nominal) <= 0 ||
+      !rateForm.effectiveFrom
+    ) {
+      setError("Honor per sesi dan tanggal berlaku wajib diisi.");
       return;
     }
     setSaving(true);
     try {
       await api.post("/honor-rates", {
-        ...form,
-        nominal: Number(form.nominal),
+        programId: rateProgram.id,
+        sessionType: rateProgram.code,
+        nominal: Number(rateForm.nominal),
+        effectiveFrom: rateForm.effectiveFrom,
       });
-      setOpen(false);
-      setForm({
-        programId: "",
-        sessionType: "REGULAR",
-        nominal: "",
-        effectiveFrom: "",
-        notes: "",
-      });
+      setRateProgram(null);
       setNotice("Tarif honor berhasil disimpan.");
       await load();
-    } catch (err: any) {
-      setError(err.response?.data?.message || "Gagal menyimpan tarif honor.");
+    } catch (e: any) {
+      setError(err(e, "Gagal menyimpan tarif honor."));
     } finally {
       setSaving(false);
     }
   }
-  function openRate(rate?: Rate) {
-    setForm({
-      programId: rate?.program?.id || "",
-      sessionType: rate?.sessionType || "REGULAR",
-      nominal: rate ? String(rate.nominal) : "",
-      effectiveFrom: "",
-      notes: "",
-    });
-    setDetail(null);
-    setOpen(true);
-  }
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Master Honor"
-        description="Kelola tarif honor tentor berdasarkan program dan tanggal berlaku."
+        title="Program"
+        description="Kelola program pembelajaran dan tarif honor tentor."
         action={
           <button
-            onClick={() => openRate()}
+            onClick={() => open()}
             className="inline-flex h-10 items-center gap-2 rounded-lg bg-navy-900 px-4 text-sm font-medium text-white"
           >
             <IconPlus className="h-4 w-4" />
-            Atur Tarif Baru
+            Tambah Program
           </button>
         }
       />
       <div className="grid grid-cols-3 gap-3">
         <Metric
           label="Program Aktif"
-          value={programs.filter((p) => p.isActive !== false).length}
+          value={programs.filter((p) => p.isActive).length}
         />
         <Metric label="Tarif Berlaku" value={active.length} />
         <Metric label="Akan Berlaku" value={future.length} />
       </div>
-      {notice && (
-        <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-          {notice}
-        </p>
-      )}
-      {error && !open && (
+      {notice && <Notice text={notice} />}{" "}
+      {error && (
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </p>
       )}
       <SectionCard
-        title="Tarif Honor Aktif"
-        description="Tarif yang digunakan untuk sesi mengajar sesuai tanggal berlakunya."
+        title="Daftar Program"
+        description="Kelola program pembelajaran yang tersedia di Pioner Class."
         action={
           <select
             value={filter}
@@ -190,16 +283,17 @@ export default function AdminHonorRatesPage() {
           <div className="h-36 animate-pulse rounded-md bg-slate-100" />
         ) : visible.length === 0 ? (
           <EmptyState
-            title="Belum ada tarif honor"
-            message="Atur tarif honor berdasarkan program agar sesi selesai dapat menghitung honor."
+            title="Belum ada program"
+            message="Tambahkan program pembelajaran untuk memulai."
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-sm">
+            <table className="w-full min-w-[850px] text-sm">
               <thead>
                 <tr className="border-b bg-slate-50 text-left text-xs font-semibold text-gray-500">
                   <th className="px-4 py-3">Program</th>
                   <th>Model</th>
+                  <th>Kuota</th>
                   <th>Honor / Sesi</th>
                   <th>Berlaku Mulai</th>
                   <th>Status</th>
@@ -207,67 +301,77 @@ export default function AdminHonorRatesPage() {
                 </tr>
               </thead>
               <tbody>
-                {visible.map((rate) => {
-                  const isFuture =
-                    rate.status === "ACTIVE" &&
-                    new Date(rate.effectiveFrom) > today;
+                {visible.map((p) => {
+                  const r = core(p) ? current(p) : undefined;
                   return (
-                    <tr
-                      key={rate.id}
-                      className="border-b border-gray-100 last:border-0"
-                    >
-                      <td className="px-4 py-3 font-medium text-gray-900">
-                        {label(rate)}
+                    <tr key={p.id} className="border-b border-gray-100">
+                      <td className="px-4 py-3 font-medium">
+                        {p.name}
+                        <small className="block text-xs text-gray-500">
+                          {p.code}
+                        </small>
                       </td>
-                      <td className="text-gray-600">{model(rate)}</td>
-                      <td className="font-semibold text-gray-900">
-                        {formatRupiah(rate.nominal)}
-                      </td>
-                      <td className="text-gray-600">
-                        {formatDate(rate.effectiveFrom)}
-                      </td>
+                      <td>{model(p)}</td>
                       <td>
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${rate.status !== "ACTIVE" ? "bg-gray-100 text-gray-600" : isFuture ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}
-                        >
-                          {rate.status !== "ACTIVE"
-                            ? "Tidak Aktif"
-                            : isFuture
-                              ? "Akan Berlaku"
-                              : "Aktif"}
-                        </span>
+                        {p.usesQuota
+                          ? `${p.defaultMeetingQuota} pertemuan`
+                          : "Tanpa kuota"}
+                      </td>
+                      <td>{r ? formatRupiah(r.nominal) : "—"}</td>
+                      <td>{r ? formatDate(r.effectiveFrom) : "—"}</td>
+                      <td>
+                        <Badge active={p.isActive} />
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="relative inline-block">
                           <button
-                            onClick={() =>
-                              setMenu(menu === rate.id ? null : rate.id)
-                            }
-                            className="rounded-md px-2 py-1 text-lg leading-none text-gray-500 hover:bg-gray-100"
-                            aria-label={`Aksi ${label(rate)}`}
+                            onClick={() => setMenu(menu === p.id ? null : p.id)}
+                            className="rounded-md px-2 py-1 text-lg text-gray-500"
                           >
                             •••
                           </button>
-                          {menu === rate.id && (
-                            <div className="absolute right-0 z-10 mt-1 w-32 rounded-md border border-gray-200 bg-white p-1 text-left shadow-lg">
+                          {menu === p.id && (
+                            <div className="absolute right-0 z-10 mt-1 w-44 rounded-md border bg-white p-1 text-left shadow-lg">
                               <button
                                 onClick={() => {
-                                  setDetail(rate);
+                                  setDetail(p);
                                   setMenu(null);
                                 }}
-                                className="block w-full rounded px-3 py-2 text-left text-xs hover:bg-gray-50"
+                                className="item"
                               >
-                                Detail
+                                Lihat Detail
                               </button>
                               <button
                                 onClick={() => {
-                                  openRate(rate);
+                                  open(p);
                                   setMenu(null);
                                 }}
-                                className="block w-full rounded px-3 py-2 text-left text-xs hover:bg-gray-50"
+                                className="item"
                               >
-                                Ubah Tarif
+                                Edit Program
                               </button>
+                              <button
+                                onClick={() => {
+                                  setMenu(null);
+                                  p.isActive ? setDeactivate(p) : status(p);
+                                }}
+                                className="item"
+                              >
+                                {p.isActive
+                                  ? "Nonaktifkan Program"
+                                  : "Aktifkan Program"}
+                              </button>
+                              {!core(p) && (
+                                <button
+                                  onClick={() => {
+                                    setDeleting(p);
+                                    setMenu(null);
+                                  }}
+                                  className="item text-red-600"
+                                >
+                                  Hapus Program
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -281,180 +385,340 @@ export default function AdminHonorRatesPage() {
         )}
       </SectionCard>
       <SectionCard
-        title="Riwayat Perubahan Tarif"
+        title="Riwayat Tarif Honor"
         description="Riwayat perubahan tarif honor berdasarkan program dan tanggal berlaku."
       >
-        {history.length === 0 ? (
-          <p className="py-4 text-sm text-gray-500">
-            Belum ada riwayat perubahan tarif.
-          </p>
-        ) : (
-          <div className="divide-y divide-gray-100">
-            {history.map((item) => (
+        {history.length ? (
+          <div className="divide-y">
+            {history.map((h) => (
               <div
-                key={item.id}
+                key={h.id}
                 className="grid gap-2 py-3 text-sm md:grid-cols-[130px_1fr_180px]"
               >
-                <p className="text-gray-500">{formatDate(item.changedAt)}</p>
+                <p>{formatDate(h.changedAt)}</p>
                 <div>
-                  <p className="font-medium text-gray-900">
-                    {label(item.rate)}
-                  </p>
-                  <p className="mt-1 text-xs text-gray-500">
-                    {item.oldNominal
-                      ? `${formatRupiah(item.oldNominal)} → `
-                      : ""}
-                    {formatRupiah(item.newNominal)}
+                  <b>{h.rate.program?.name || "—"}</b>
+                  <p className="text-xs">
+                    {h.oldNominal ? `${formatRupiah(h.oldNominal)} → ` : ""}
+                    {formatRupiah(h.newNominal)}
                   </p>
                 </div>
-                <p className="text-xs text-gray-500">
-                  {item.reason || "Tarif diperbarui"}
-                </p>
+                <p className="text-xs">{h.reason || "Tarif diperbarui"}</p>
               </div>
             ))}
           </div>
+        ) : (
+          <EmptyState message="Belum ada riwayat perubahan tarif." />
         )}
       </SectionCard>
-      {open && (
+      {programOpen && (
         <Modal
-          title="Atur Tarif Baru"
-          onClose={() => !saving && setOpen(false)}
-          className="max-w-[620px]"
+          title={editing ? "Edit Program" : "Tambah Program"}
+          onClose={() =>
+            !saving && (setEditing(null), setForm(empty), setProgramOpen(false))
+          }
         >
-          <form onSubmit={save} className="space-y-4">
-            <label className="block text-xs font-medium text-gray-700">
-              Program
+          <form onSubmit={saveProgram} className="space-y-4">
+            <Field
+              label="Nama Program"
+              value={form.name}
+              onChange={(v) => setForm({ ...form, name: v })}
+            />
+            <Field
+              label="Kode Program"
+              value={form.code}
+              disabled={!!editing}
+              onChange={(v) => setForm({ ...form, code: v.toUpperCase() })}
+            />
+            <label className="block text-xs font-medium">
+              Model Pembelajaran
               <select
-                required
-                value={form.programId}
-                onChange={(e) => {
-                  const p = programs.find((x) => x.id === e.target.value);
-                  setForm({
-                    ...form,
-                    programId: e.target.value,
-                    sessionType: p?.code === "PRIVATE" ? "PRIVATE" : "REGULAR",
-                  });
-                }}
-                className="mt-1 h-10 w-full rounded-md border border-gray-300 px-3 text-sm"
+                value={form.learningModel}
+                onChange={(e) =>
+                  setForm({ ...form, learningModel: e.target.value })
+                }
+                className="mt-1 h-10 w-full rounded-md border px-3"
               >
-                <option value="">Pilih program</option>
-                {programs
-                  .filter((p) => p.isActive !== false)
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
+                <option value="INDIVIDUAL">Individual</option>
+                <option value="CLASS_BASED">Berbasis Kelas</option>
               </select>
             </label>
-            <label className="block text-xs font-medium text-gray-700">
-              Honor per Sesi
-              <div className="mt-1 flex h-10 overflow-hidden rounded-md border border-gray-300">
-                <span className="flex items-center border-r border-gray-200 px-3 text-sm text-gray-500">
-                  Rp
-                </span>
-                <input
-                  required
-                  min="1"
-                  type="number"
-                  value={form.nominal}
-                  onChange={(e) =>
-                    setForm({ ...form, nominal: e.target.value })
-                  }
-                  className="min-w-0 flex-1 px-3 text-sm outline-none"
-                  placeholder="Masukkan nominal honor"
-                />
-              </div>
-            </label>
-            <label className="block text-xs font-medium text-gray-700">
-              Berlaku Mulai
+            <label className="flex gap-2 text-xs">
               <input
-                required
-                type="date"
-                value={form.effectiveFrom}
+                type="checkbox"
+                checked={form.usesQuota}
                 onChange={(e) =>
-                  setForm({ ...form, effectiveFrom: e.target.value })
+                  setForm({ ...form, usesQuota: e.target.checked })
                 }
-                className="mt-1 h-10 w-full rounded-md border border-gray-300 px-3 text-sm"
               />
+              Program menggunakan kuota pertemuan
             </label>
-            <p className="text-xs text-gray-500">
-              Tarif digunakan untuk sesi yang diselesaikan sesuai periode
-              berlakunya.
-            </p>
-            {error && (
-              <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-                {error}
-              </p>
-            )}
-            <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="rounded-md border border-gray-300 px-4 py-2 text-sm"
-              >
-                Batal
-              </button>
-              <button
-                disabled={saving}
-                className="rounded-md bg-navy-900 px-4 py-2 text-sm font-medium text-white"
-              >
-                {saving ? "Menyimpan..." : "Simpan Tarif"}
-              </button>
-            </div>
+            <Field
+              label="Kuota Standar"
+              type="number"
+              value={form.defaultMeetingQuota}
+              onChange={(v) => setForm({ ...form, defaultMeetingQuota: v })}
+            />
+            <Buttons
+              saving={saving}
+              label={editing ? "Simpan Perubahan" : "Tambah Program"}
+              cancel={() => {
+                setEditing(null);
+                setForm(empty);
+                setProgramOpen(false);
+              }}
+            />
           </form>
         </Modal>
       )}
       {detail && (
         <Modal
-          title="Detail Tarif Honor"
+          title="Detail Program"
           onClose={() => setDetail(null)}
-          className="max-w-[620px]"
+          className="max-w-[680px]"
         >
-          <div className="space-y-4 text-sm">
-            <div>
-              <p className="text-xs text-gray-500">Program</p>
-              <p className="mt-1 font-semibold text-gray-900">
-                {label(detail)}
-              </p>
-              <p className="text-xs text-gray-500">{model(detail)}</p>
-            </div>
-            <Info label="Honor / Sesi" value={formatRupiah(detail.nominal)} />
+          <div className="space-y-4">
+            <Info label="Nama" value={detail.name} />
+            <Info label="Kode" value={detail.code} />
+            <Info label="Model" value={model(detail)} />
             <Info
-              label="Berlaku Mulai"
-              value={formatDate(detail.effectiveFrom)}
+              label="Kuota"
+              value={
+                detail.usesQuota
+                  ? `${detail.defaultMeetingQuota} pertemuan`
+                  : "Tanpa kuota"
+              }
             />
             <Info
               label="Status"
-              value={detail.status === "ACTIVE" ? "Aktif" : "Tidak Aktif"}
+              value={detail.isActive ? "Aktif" : "Nonaktif"}
             />
-            <div className="flex justify-end border-t border-gray-100 pt-4">
-              <button
-                onClick={() => openRate(detail)}
-                className="rounded-md bg-navy-900 px-4 py-2 text-sm font-medium text-white"
-              >
-                Ubah Tarif
-              </button>
+            <div className="border-t pt-4">
+              <h4 className="font-semibold">Tarif Honor</h4>
+              {core(detail) ? (
+                <>
+                  <Info
+                    label="Tarif Berlaku"
+                    value={
+                      current(detail)
+                        ? `${formatRupiah(current(detail)!.nominal)} · ${formatDate(current(detail)!.effectiveFrom)}`
+                        : "Belum diatur"
+                    }
+                  />
+                  {futures(detail).map((r) => (
+                    <Info
+                      key={r.id}
+                      label="Akan Berlaku"
+                      value={`${formatRupiah(r.nominal)} · ${formatDate(r.effectiveFrom)}`}
+                    />
+                  ))}
+                  <button
+                    onClick={() => {
+                      setRateForm({ nominal: "", effectiveFrom: "" });
+                      setRateProgram(detail);
+                    }}
+                    className="mt-4 rounded-md bg-navy-900 px-4 py-2 text-sm text-white"
+                  >
+                    + Atur Tarif Baru
+                  </button>
+                  <div className="mt-4 text-xs">
+                    {history
+                      .filter((h) => h.rate.program?.id === detail.id)
+                      .map((h) => (
+                        <p key={h.id}>
+                          {formatDate(h.changedAt)} ·{" "}
+                          {formatRupiah(h.newNominal)} ·{" "}
+                          {h.reason || "Tarif diperbarui"}
+                        </p>
+                      ))}
+                  </div>
+                </>
+              ) : (
+                <p className="mt-3 rounded-md bg-slate-50 p-3 text-sm text-gray-600">
+                  Tarif honor untuk program ini belum dapat dikonfigurasi.
+                  Dukungan tarif program dinamis belum tersedia pada alur
+                  operasional saat ini.
+                </p>
+              )}
             </div>
           </div>
         </Modal>
+      )}
+      {rateProgram && (
+        <Modal
+          title="Atur Tarif Baru"
+          onClose={() => !saving && setRateProgram(null)}
+        >
+          <form onSubmit={saveRate} className="space-y-4">
+            <p className="text-sm">
+              Program: <b>{rateProgram.name}</b>
+            </p>
+            <Field
+              label="Honor per Sesi"
+              type="number"
+              value={rateForm.nominal}
+              onChange={(v) => setRateForm({ ...rateForm, nominal: v })}
+            />
+            <Field
+              label="Berlaku Mulai"
+              type="date"
+              value={rateForm.effectiveFrom}
+              onChange={(v) => setRateForm({ ...rateForm, effectiveFrom: v })}
+            />
+            <Buttons
+              saving={saving}
+              label="Simpan Tarif"
+              cancel={() => setRateProgram(null)}
+            />
+          </form>
+        </Modal>
+      )}
+      {deactivate && (
+        <Confirm
+          title="Nonaktifkan Program?"
+          text="Program akan ditandai sebagai tidak aktif dan tetap tersimpan dalam sistem."
+          action="Nonaktifkan"
+          saving={saving}
+          cancel={() => setDeactivate(null)}
+          confirm={() => status(deactivate)}
+        />
+      )}{" "}
+      {deleting && (
+        <Confirm
+          title="Hapus Program?"
+          text="Program akan dihapus secara permanen jika belum pernah digunakan pada data operasional. Tindakan ini tidak dapat dibatalkan."
+          action="Hapus Program"
+          saving={saving}
+          danger
+          cancel={() => setDeleting(null)}
+          confirm={() => remove(deleting)}
+        />
       )}
     </div>
   );
 }
 function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white px-4 py-4">
+    <div className="rounded-lg border bg-white p-4">
       <p className="text-xs text-gray-500">{label}</p>
-      <p className="mt-1 text-2xl font-semibold text-gray-900">{value}</p>
+      <p className="text-2xl font-semibold">{value}</p>
     </div>
+  );
+}
+function Notice({ text }: { text: string }) {
+  return (
+    <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+      {text}
+    </p>
+  );
+}
+function Badge({ active }: { active: boolean }) {
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-xs ${active ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-600"}`}
+    >
+      {active ? "Aktif" : "Nonaktif"}
+    </span>
   );
 }
 function Info({ label, value }: { label: string; value: string }) {
   return (
-    <div className="border-t border-gray-100 pt-3">
+    <div className="border-t pt-3">
       <p className="text-xs text-gray-500">{label}</p>
-      <p className="mt-1 font-medium text-gray-900">{value}</p>
+      <p className="font-medium">{value}</p>
     </div>
+  );
+}
+function Field({
+  label,
+  value,
+  onChange,
+  type = "text",
+  disabled = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  type?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="block text-xs font-medium">
+      {label}
+      <input
+        required
+        type={type}
+        min={type === "number" ? 1 : undefined}
+        disabled={disabled}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-1 h-10 w-full rounded-md border px-3 disabled:bg-slate-100"
+      />
+    </label>
+  );
+}
+function Buttons({
+  saving,
+  label,
+  cancel,
+}: {
+  saving: boolean;
+  label: string;
+  cancel: () => void;
+}) {
+  return (
+    <div className="flex justify-end gap-2 border-t pt-4">
+      <button
+        type="button"
+        onClick={cancel}
+        className="rounded-md border px-4 py-2 text-sm"
+      >
+        Batal
+      </button>
+      <button
+        disabled={saving}
+        className="rounded-md bg-navy-900 px-4 py-2 text-sm text-white"
+      >
+        {saving ? "Menyimpan..." : label}
+      </button>
+    </div>
+  );
+}
+function Confirm({
+  title,
+  text,
+  action,
+  saving,
+  danger = false,
+  cancel,
+  confirm,
+}: {
+  title: string;
+  text: string;
+  action: string;
+  saving: boolean;
+  danger?: boolean;
+  cancel: () => void;
+  confirm: () => void;
+}) {
+  return (
+    <Modal title={title} onClose={cancel}>
+      <p className="text-sm text-gray-600">{text}</p>
+      <div className="mt-5 flex justify-end gap-2">
+        <button
+          onClick={cancel}
+          className="rounded-md border px-4 py-2 text-sm"
+        >
+          Batal
+        </button>
+        <button
+          disabled={saving}
+          onClick={confirm}
+          className={`rounded-md px-4 py-2 text-sm text-white ${danger ? "bg-red-600" : "bg-navy-900"}`}
+        >
+          {action}
+        </button>
+      </div>
+    </Modal>
   );
 }
