@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import api from "@/lib/api";
+import api, { errorMessage } from "@/lib/api";
 import Modal from "@/components/Modal";
 import PageHeader from "@/components/PageHeader";
 import SectionCard from "@/components/SectionCard";
@@ -401,7 +401,7 @@ export default function AdminSchedulesPage() {
       await load();
     } catch (error: any) {
       setMutationError(
-        error.response?.data?.message || "Gagal menyimpan pola jadwal.",
+        errorMessage(error, "Gagal menyimpan pola jadwal."),
       );
     } finally {
       setSaving(false);
@@ -439,7 +439,7 @@ export default function AdminSchedulesPage() {
       setEditing(null);
     } catch (error: any) {
       setMutationError(
-        error.response?.data?.message || "Gagal menyimpan pertemuan.",
+        errorMessage(error, "Gagal menyimpan pertemuan."),
       );
     } finally {
       setSaving(false);
@@ -461,7 +461,7 @@ export default function AdminSchedulesPage() {
       await load();
     } catch (error: any) {
       setMutationError(
-        error.response?.data?.message || "Gagal membatalkan pertemuan.",
+        errorMessage(error, "Gagal membatalkan pertemuan."),
       );
     } finally {
       setCancelling(false);
@@ -478,7 +478,7 @@ export default function AdminSchedulesPage() {
       await load();
     } catch (error: any) {
       setMutationError(
-        error.response?.data?.message || "Gagal menghapus pertemuan.",
+        errorMessage(error, "Gagal menghapus pertemuan."),
       );
     } finally {
       setDeleting(false);

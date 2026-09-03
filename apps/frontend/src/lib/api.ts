@@ -12,6 +12,25 @@ export function assetUrl(path: string | null | undefined): string | null {
   return `${API_ORIGIN}${path}`;
 }
 
+/**
+ * Best-effort human-readable message from a failed `api` call. Most backend
+ * errors set `{ message }`; zod validation errors instead set
+ * `{ error: "Validation error", details: { fieldName: ["reason", ...] } }`
+ * with no top-level `message` — without this, callers falling back to a
+ * generic string hide the actual reason (e.g. "Jam selesai harus setelah
+ * jam mulai.") behind DevTools.
+ */
+export function errorMessage(error: unknown, fallback: string): string {
+  const data = (error as { response?: { data?: { message?: string; details?: Record<string, string[]> } } })
+    ?.response?.data;
+  if (data?.message) return data.message;
+  if (data?.details) {
+    const first = Object.values(data.details).flat()[0];
+    if (typeof first === 'string') return first;
+  }
+  return fallback;
+}
+
 const api = axios.create({
   baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
