@@ -78,12 +78,10 @@ router.post(
   async (req: Request, res: Response) => {
     const parsed = changeRequestSchema.safeParse(req.body);
     if (!parsed.success)
-      return res
-        .status(400)
-        .json({
-          error: "Validation error",
-          details: parsed.error.flatten().fieldErrors,
-        });
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
     try {
       const tutorId = await resolveTutorIdForUser(req.user!.userId);
       const session = tutorId
@@ -92,12 +90,10 @@ router.post(
           })
         : null;
       if (!session)
-        return res
-          .status(403)
-          .json({
-            error: "Forbidden",
-            message: "Sesi tidak ditemukan atau bukan milik Anda.",
-          });
+        return res.status(403).json({
+          error: "Forbidden",
+          message: "Sesi tidak ditemukan atau bukan milik Anda.",
+        });
       if (!["SCHEDULED", "IN_PROGRESS"].includes(session.status))
         throw new Error(
           "Sesi yang selesai atau dibatalkan tidak dapat diajukan perubahan.",
@@ -106,13 +102,11 @@ router.post(
         where: { teachingSessionId: session.id, status: "PENDING" },
       });
       if (pending)
-        return res
-          .status(409)
-          .json({
-            error: "Conflict",
-            message:
-              "Pengajuan perubahan untuk sesi ini masih menunggu persetujuan.",
-          });
+        return res.status(409).json({
+          error: "Conflict",
+          message:
+            "Pengajuan perubahan untuk sesi ini masih menunggu persetujuan.",
+        });
       const data = parsed.data;
       const request = await prisma.scheduleChangeRequest.create({
         data: {
@@ -130,12 +124,10 @@ router.post(
       });
       res.status(201).json({ success: true, data: request });
     } catch (err: any) {
-      res
-        .status(err.status || 400)
-        .json({
-          error: "Request error",
-          message: err.message || "Gagal mengirim pengajuan.",
-        });
+      res.status(err.status || 400).json({
+        error: "Request error",
+        message: err.message || "Gagal mengirim pengajuan.",
+      });
     }
   },
 );
@@ -211,6 +203,11 @@ const directSessionSchema = z
     sessionType: z.enum(["REGULAR", "PRIVATE"]),
     classId: z.string().uuid().optional(),
     studentId: z.string().uuid().optional(),
+    studentIds: z
+      .array(z.string().uuid())
+      .min(1, "Pilih minimal 1 siswa.")
+      .max(3, "Maksimal 3 siswa dalam satu sesi privat.")
+      .optional(),
     subjectId: z.string().uuid(),
     mode: z.enum(["OFFLINE", "ONLINE"]),
     location: z.string().max(255).optional(),
@@ -225,11 +222,21 @@ const directSessionSchema = z
         path: ["classId"],
         message: "Kelas wajib dipilih.",
       });
-    if (data.sessionType === "PRIVATE" && !data.studentId)
+    if (data.sessionType === "PRIVATE" && !data.studentIds && !data.studentId)
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["studentId"],
-        message: "Siswa wajib dipilih.",
+        path: ["studentIds"],
+        message: "Pilih minimal 1 siswa.",
+      });
+    if (
+      data.sessionType === "PRIVATE" &&
+      data.studentIds &&
+      new Set(data.studentIds).size !== data.studentIds.length
+    )
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["studentIds"],
+        message: "Siswa tidak boleh dipilih lebih dari sekali.",
       });
     if (data.sessionType === "PRIVATE" && !data.progressNotes)
       ctx.addIssue({

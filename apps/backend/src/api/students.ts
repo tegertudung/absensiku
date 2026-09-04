@@ -26,6 +26,9 @@ const createSchema = z.object({
   email: z.string().email("Email tidak valid").optional(),
   guardianName: z.string().optional(),
   guardianPhone: z.string().optional(),
+  nis: z.string().trim().max(100).optional(),
+  school: z.string().trim().max(200).optional(),
+  schoolClass: z.string().trim().max(100).optional(),
   classId: z.string().uuid().nullable().optional(),
 });
 
@@ -100,6 +103,9 @@ const updateSchema = z.object({
   email: z.string().email().optional(),
   guardianName: z.string().optional(),
   guardianPhone: z.string().optional(),
+  nis: z.string().trim().max(100).optional(),
+  school: z.string().trim().max(200).optional(),
+  schoolClass: z.string().trim().max(100).optional(),
 });
 
 // PUT /api/students/:id

@@ -1,5 +1,5 @@
-import { prisma } from '../utils/prisma';
-import { AppError } from '../utils/errors';
+import { prisma } from "../utils/prisma";
+import { AppError } from "../utils/errors";
 
 /**
  * Resolves a child only through the ParentStudent mapping.  This is the
@@ -7,11 +7,14 @@ import { AppError } from '../utils/errors';
  * A missing link deliberately has the same response as a missing student so
  * a parent cannot use this endpoint to discover other students.
  */
-export async function assertParentOwnsStudent(parentId: string, studentId: string) {
+export async function assertParentOwnsStudent(
+  parentId: string,
+  studentId: string,
+) {
   const link = await prisma.parentStudent.findUnique({
     where: { parentId_studentId: { parentId, studentId } },
   });
-  if (!link) throw new AppError('Data siswa tidak ditemukan.', 404);
+  if (!link) throw new AppError("Data siswa tidak ditemukan.", 404);
   return link;
 }
 
@@ -27,12 +30,28 @@ export async function listChildrenForParent(parentId: string) {
       student: {
         include: {
           enrollments: {
-            where: { status: 'ACTIVE' },
-            include: { class: { select: { id: true, name: true, quotaTotal: true, quotaUsed: true, quotaRemaining: true } } },
+            where: { status: "ACTIVE" },
+            include: {
+              class: {
+                select: {
+                  id: true,
+                  name: true,
+                  quotaTotal: true,
+                  quotaUsed: true,
+                  quotaRemaining: true,
+                },
+              },
+            },
           },
           packages: {
-            where: { status: 'ACTIVE' },
-            select: { id: true, packageName: true, quotaTotal: true, quotaUsed: true, quotaRemaining: true },
+            where: { status: "ACTIVE" },
+            select: {
+              id: true,
+              packageName: true,
+              quotaTotal: true,
+              quotaUsed: true,
+              quotaRemaining: true,
+            },
           },
         },
       },
@@ -52,15 +71,15 @@ export async function listChildrenForParent(parentId: string) {
       status: link.student.status,
       programs: [
         ...link.student.enrollments.map((e) => ({
-          type: 'REGULAR' as const,
+          type: "REGULAR" as const,
           label: e.class.name,
           quotaTotal: e.class.quotaTotal,
           quotaUsed: e.class.quotaUsed,
           quotaRemaining: e.class.quotaRemaining,
         })),
         ...link.student.packages.map((p) => ({
-          type: 'PRIVATE' as const,
-          label: p.packageName || 'Paket Privat',
+          type: "PRIVATE" as const,
+          label: p.packageName || "Paket Privat",
           quotaTotal: p.quotaTotal,
           quotaUsed: p.quotaUsed,
           quotaRemaining: p.quotaRemaining,
@@ -77,7 +96,11 @@ export async function listChildrenForParent(parentId: string) {
  * TeachingSession reguler tercatat per-kelas bukan per-siswa — lihat catatan
  * yang sama di halaman detail siswa admin).
  */
-export async function getChildProgress(parentId: string, studentId: string, date?: Date) {
+export async function getChildProgress(
+  parentId: string,
+  studentId: string,
+  date?: Date,
+) {
   await assertParentOwnsStudent(parentId, studentId);
 
   const dayRange = date
@@ -89,9 +112,17 @@ export async function getChildProgress(parentId: string, studentId: string, date
 
   const [privateSessions, attendanceRecords] = await Promise.all([
     prisma.teachingSession.findMany({
-      where: { studentId, sessionType: 'PRIVATE', status: 'COMPLETED', ...(dayRange ? { sessionDate: dayRange } : {}) },
-      include: { tutor: { select: { name: true } }, subject: { select: { name: true } } },
-      orderBy: { sessionDate: 'desc' },
+      where: {
+        sessionType: "PRIVATE",
+        status: "COMPLETED",
+        OR: [{ studentId }, { attendanceRecords: { some: { studentId } } }],
+        ...(dayRange ? { sessionDate: dayRange } : {}),
+      },
+      include: {
+        tutor: { select: { name: true } },
+        subject: { select: { name: true } },
+      },
+      orderBy: { sessionDate: "desc" },
       take: 50,
     }),
     prisma.attendanceRecord.findMany({
@@ -101,7 +132,8 @@ export async function getChildProgress(parentId: string, studentId: string, date
       where: {
         studentId,
         session: {
-          status: 'COMPLETED',
+          status: "COMPLETED",
+          sessionType: "REGULAR",
           ...(dayRange ? { sessionDate: dayRange } : {}),
         },
       },
@@ -114,7 +146,7 @@ export async function getChildProgress(parentId: string, studentId: string, date
           },
         },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       take: 50,
     }),
   ]);

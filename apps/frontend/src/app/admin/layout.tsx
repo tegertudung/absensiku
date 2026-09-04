@@ -36,6 +36,7 @@ const PAGE_CONTEXT: Record<string, string> = {
   "/admin/honor-rates": "Program",
   "/admin/audit-log": "Audit Log",
   "/admin/settings": "Pengaturan",
+  "/admin/student-letters": "Surat Siswa",
 };
 
 // NOTE: only the "Orang Tua" entry is new here — everything else is
@@ -84,6 +85,12 @@ const NAV_ITEMS = [
     section: "AKADEMIK",
   },
   {
+    href: "/admin/student-letters",
+    label: "Surat Siswa",
+    icon: IconReport,
+    section: "ADMINISTRASI",
+  },
+  {
     href: "/admin/recap",
     label: "Rekap & Honor",
     icon: IconReport,
@@ -125,6 +132,12 @@ export default function AdminLayout({
   const pageContext =
     PAGE_CONTEXT[pathname] ||
     (pathname.startsWith("/admin/students/") ? "Detail Siswa" : "Admin");
+
+  // A printable letter is a standalone document. Keeping it under the admin
+  // URL preserves authorization and links, but it must not inherit the visual
+  // application shell (sidebar, topbar, dashboard padding) in either screen
+  // preview or browser print.
+  const isStudentLetterPrint = /^\/admin\/student-letters\/[^/]+\/print$/.test(pathname);
 
   useEffect(() => {
     api
@@ -206,6 +219,10 @@ export default function AdminLayout({
       </div>
     </div>
   );
+
+  if (isStudentLetterPrint) {
+    return <RequireAuth role="ADMIN">{children}</RequireAuth>;
+  }
 
   return (
     <RequireAuth role="ADMIN">

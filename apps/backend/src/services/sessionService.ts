@@ -9,6 +9,7 @@ import {
   notifyParentsOfStudent,
   notifyParentsOfClass,
 } from "./notificationService";
+import { resolvePrivateSessionParticipantIds } from "./privateSessionParticipantService";
 
 export class SessionError extends Error {
   status: number;
@@ -159,11 +160,13 @@ export async function createSessionFromSchedule(params: {
 type CompletionNotifyInfo =
   | {
       kind: "PRIVATE";
-      studentId: string;
-      studentName: string;
+      participants: Array<{
+        studentId: string;
+        studentName: string;
+        quotaRemaining: number;
+      }>;
       subjectName: string | null;
       score: number | null;
-      quotaRemaining: number;
     }
   | { kind: "REGULAR"; classId: string; quotaRemaining: number }
   | null;
@@ -192,6 +195,7 @@ async function finalizeTeachingSession(
     include: {
       subject: { select: { id: true, name: true } },
       student: { select: { name: true } },
+      attendanceRecords: { select: { studentId: true } },
     },
   });
   if (!session) throw new SessionError("Sesi tidak ditemukan", 404);
@@ -262,52 +266,79 @@ async function finalizeTeachingSession(
   }
 
   if (session.sessionType === "PRIVATE") {
-    if (!session.studentId)
+    const participantIds = resolvePrivateSessionParticipantIds(session);
+    if (!participantIds.length)
       throw new SessionError("Sesi privat tidak memiliki siswa", 400);
 
-    // Lock-free but safe: quotaRemaining > 0 is checked in the WHERE clause of the
-    // update itself in a real high-concurrency system you'd use a SELECT ... FOR UPDATE;
-    // Prisma's transaction + this conditional find/update pair is sufficient for our scale.
-    const pkg = await tx.privatePackage.findFirst({
+    const packages = await tx.privatePackage.findMany({
       where: {
-        studentId: session.studentId,
+        studentId: { in: participantIds },
         status: "ACTIVE",
         quotaRemaining: { gt: 0 },
       },
       orderBy: { activationDate: "asc" },
     });
-
-    if (!pkg) {
-      throw new SessionError(
-        "Kuota paket privat sudah habis. Sesi tidak dapat diselesaikan tanpa tindakan admin.",
-        409,
-      );
+    const packageByStudentId = new Map<string, (typeof packages)[number]>();
+    for (const pkg of packages) {
+      if (!packageByStudentId.has(pkg.studentId)) {
+        packageByStudentId.set(pkg.studentId, pkg);
+      }
+    }
+    if (
+      participantIds.some((studentId) => !packageByStudentId.has(studentId))
+    ) {
+      throw new SessionError("Kuota privat siswa sudah habis.", 409);
     }
 
-    const updatedPkg = await tx.privatePackage.update({
-      where: { id: pkg.id },
-      data: { quotaUsed: { increment: 1 }, quotaRemaining: { decrement: 1 } },
+    const updatedPackages = await Promise.all(
+      participantIds.map(async (studentId) => {
+        const pkg = packageByStudentId.get(studentId)!;
+        const quotaUpdate = await tx.privatePackage.updateMany({
+          where: { id: pkg.id, quotaRemaining: { gt: 0 } },
+          data: {
+            quotaUsed: { increment: 1 },
+            quotaRemaining: { decrement: 1 },
+          },
+        });
+        if (quotaUpdate.count !== 1)
+          throw new SessionError("Kuota privat siswa sudah habis.", 409);
+        const updatedPkg = await tx.privatePackage.findUniqueOrThrow({
+          where: { id: pkg.id },
+        });
+        await tx.privatePackageUsage.create({
+          data: {
+            packageId: pkg.id,
+            sessionId: session.id,
+            quantityUsed: 1,
+            changeType: "SESSION_COMPLETED",
+            changedBy: userId,
+            reason: "Sesi privat diselesaikan oleh tentor",
+          },
+        });
+        return { studentId, updatedPkg };
+      }),
+    );
+    const participantStudents = await tx.student.findMany({
+      where: { id: { in: participantIds } },
+      select: { id: true, name: true },
     });
-
-    await tx.privatePackageUsage.create({
-      data: {
-        packageId: pkg.id,
-        sessionId: session.id,
-        quantityUsed: 1,
-        changeType: "SESSION_COMPLETED",
-        changedBy: userId,
-        reason: "Sesi privat diselesaikan oleh tentor",
-      },
-    });
+    const participantNameById = new Map(
+      participantStudents.map((student) => [student.id, student.name]),
+    );
 
     const finalScore = record?.score ?? session.score;
     notifyInfo = {
       kind: "PRIVATE",
-      studentId: session.studentId,
-      studentName: session.student?.name ?? "",
+      participants: updatedPackages.map(({ studentId, updatedPkg }) => ({
+        studentId,
+        studentName:
+          participantNameById.get(studentId) ??
+          (studentId === session.studentId ? session.student?.name : null) ??
+          "",
+        quotaRemaining: updatedPkg.quotaRemaining,
+      })),
       subjectName: session.subject?.name ?? null,
       score: finalScore != null ? Number(finalScore) : null,
-      quotaRemaining: updatedPkg.quotaRemaining,
     };
   }
 
@@ -363,6 +394,7 @@ export async function createDirectSession(params: {
   sessionType: "REGULAR" | "PRIVATE";
   classId?: string;
   studentId?: string;
+  studentIds?: string[];
   subjectId: string;
   mode: "OFFLINE" | "ONLINE";
   location?: string;
@@ -403,6 +435,7 @@ export async function createDirectSession(params: {
     let classId: string | undefined;
     let studentId: string | undefined;
     let programId: string | null | undefined;
+    let privateStudentIds: string[] = [];
     if (params.sessionType === "REGULAR") {
       if (!params.classId)
         throw new SessionError("Kelas wajib dipilih untuk sesi reguler.", 422);
@@ -414,28 +447,72 @@ export async function createDirectSession(params: {
       classId = kelas.id;
       programId = kelas.programId;
     } else {
-      if (!params.studentId)
-        throw new SessionError("Siswa wajib dipilih untuk sesi privat.", 422);
-      const student = await tx.student.findFirst({
-        where: { id: params.studentId, status: "ACTIVE" },
+      privateStudentIds =
+        params.studentIds ?? (params.studentId ? [params.studentId] : []);
+      if (!privateStudentIds.length)
+        throw new SessionError("Pilih minimal 1 siswa.", 422);
+      if (privateStudentIds.length > 3)
+        throw new SessionError("Maksimal 3 siswa dalam satu sesi privat.", 422);
+      if (new Set(privateStudentIds).size !== privateStudentIds.length)
+        throw new SessionError(
+          "Siswa tidak boleh dipilih lebih dari sekali.",
+          422,
+        );
+
+      const students = await tx.student.findMany({
+        where: { id: { in: privateStudentIds }, status: "ACTIVE" },
       });
-      if (!student)
+      if (students.length !== privateStudentIds.length)
         throw new SessionError("Siswa tidak ditemukan atau tidak aktif.", 404);
-      const pkg = await tx.privatePackage.findFirst({
+      const activePackages = await tx.privatePackage.findMany({
         where: {
-          studentId: student.id,
+          studentId: { in: privateStudentIds },
           status: "ACTIVE",
-          quotaRemaining: { gt: 0 },
         },
         orderBy: { activationDate: "asc" },
       });
-      if (!pkg)
+      const activePackageStudentIds = new Set(
+        activePackages.map((pkg) => pkg.studentId),
+      );
+      if (privateStudentIds.some((id) => !activePackageStudentIds.has(id)))
+        throw new SessionError("Siswa tidak memiliki paket privat aktif.", 409);
+      const packageByStudentId = new Map<
+        string,
+        (typeof activePackages)[number]
+      >();
+      for (const pkg of activePackages) {
+        if (pkg.quotaRemaining > 0 && !packageByStudentId.has(pkg.studentId)) {
+          packageByStudentId.set(pkg.studentId, pkg);
+        }
+      }
+      if (privateStudentIds.some((id) => !packageByStudentId.has(id)))
+        throw new SessionError("Kuota privat siswa sudah habis.", 409);
+
+      const rates = await Promise.all(
+        privateStudentIds.map(async (id) => {
+          const pkg = packageByStudentId.get(id)!;
+          const rate = await getApplicableHonorRate(
+            "PRIVATE",
+            params.sessionDate,
+            tx,
+            pkg.programId,
+          );
+          if (!rate)
+            throw new SessionError(
+              "Tidak ada tarif honor aktif untuk sesi PRIVATE. Hubungi admin untuk mengatur master tarif.",
+              422,
+            );
+          return rate;
+        }),
+      );
+      if (new Set(rates.map((rate) => rate.nominal.toString())).size > 1)
         throw new SessionError(
-          "Kuota paket privat sudah habis. Hubungi admin untuk perpanjangan.",
-          409,
+          "Siswa ini memiliki tarif privat yang berbeda dan tidak dapat digabung dalam sesi yang sama.",
+          422,
         );
-      studentId = student.id;
-      programId = pkg.programId;
+
+      studentId = privateStudentIds[0];
+      programId = packageByStudentId.get(studentId)!.programId;
     }
     if (!programId)
       programId = (
@@ -459,6 +536,15 @@ export async function createDirectSession(params: {
           params.mode === "OFFLINE" ? params.location?.trim() || null : null,
       },
     });
+    if (params.sessionType === "PRIVATE") {
+      await tx.attendanceRecord.createMany({
+        data: privateStudentIds.map((participantId) => ({
+          sessionId: session.id,
+          studentId: participantId,
+          status: "PRESENT",
+        })),
+      });
+    }
     return finalizeTeachingSession(
       tx,
       session.id,
@@ -487,25 +573,28 @@ async function notifyOfCompletion(
   if (info.kind === "PRIVATE") {
     const subject = info.subjectName ? ` ${info.subjectName}` : "";
     const scoreText = info.score != null ? ` Nilai: ${info.score}.` : "";
-    await notifyParentsOfStudent(info.studentId, {
-      title: "Sesi Privat Selesai",
-      message: `Sesi${subject} ${info.studentName} hari ini telah selesai.${scoreText}`,
-      type: "SESSION_COMPLETED",
-    });
-
-    if (info.quotaRemaining === 0) {
-      await notifyParentsOfStudent(info.studentId, {
-        title: "Kuota Privat Habis",
-        message: `Kuota les privat ${info.studentName} sudah habis. Hubungi Admin untuk memperpanjang.`,
-        type: "QUOTA_LOW",
-      });
-    } else if (info.quotaRemaining === lowQuotaThreshold) {
-      await notifyParentsOfStudent(info.studentId, {
-        title: "Kuota Privat Menipis",
-        message: `Sisa kuota les privat ${info.studentName} tinggal ${info.quotaRemaining} pertemuan lagi.`,
-        type: "QUOTA_LOW",
-      });
-    }
+    await Promise.all(
+      info.participants.map(async (participant) => {
+        await notifyParentsOfStudent(participant.studentId, {
+          title: "Sesi Privat Selesai",
+          message: `Sesi${subject} ${participant.studentName} hari ini telah selesai.${scoreText}`,
+          type: "SESSION_COMPLETED",
+        });
+        if (participant.quotaRemaining === 0) {
+          await notifyParentsOfStudent(participant.studentId, {
+            title: "Kuota Privat Habis",
+            message: `Kuota les privat ${participant.studentName} sudah habis. Hubungi Admin untuk memperpanjang.`,
+            type: "QUOTA_LOW",
+          });
+        } else if (participant.quotaRemaining === lowQuotaThreshold) {
+          await notifyParentsOfStudent(participant.studentId, {
+            title: "Kuota Privat Menipis",
+            message: `Sisa kuota les privat ${participant.studentName} tinggal ${participant.quotaRemaining} pertemuan lagi.`,
+            type: "QUOTA_LOW",
+          });
+        }
+      }),
+    );
     return;
   }
 
@@ -576,6 +665,7 @@ export async function completeSessionsBatch(params: {
         },
     include: {
       class: true,
+      attendanceRecords: { select: { studentId: true } },
       student: {
         include: {
           packages: {
@@ -635,8 +725,11 @@ export async function completeSessionsBatch(params: {
       });
     if (s.sessionType === "REGULAR" && s.classId)
       regular.set(s.classId, (regular.get(s.classId) ?? 0) + 1);
-    if (s.sessionType === "PRIVATE" && s.studentId)
-      privateNeeds.set(s.studentId, (privateNeeds.get(s.studentId) ?? 0) + 1);
+    if (s.sessionType === "PRIVATE") {
+      for (const studentId of resolvePrivateSessionParticipantIds(s)) {
+        privateNeeds.set(studentId, (privateNeeds.get(studentId) ?? 0) + 1);
+      }
+    }
   }
   for (const [classId, count] of regular) {
     const c = sessions.find((s) => s.classId === classId)?.class;
@@ -647,9 +740,26 @@ export async function completeSessionsBatch(params: {
         message: "Kuota kelas tidak mencukupi.",
       });
   }
+  const privatePackages = privateNeeds.size
+    ? await prisma.privatePackage.findMany({
+        where: {
+          studentId: { in: [...privateNeeds.keys()] },
+          status: "ACTIVE",
+        },
+        orderBy: { activationDate: "asc" },
+      })
+    : [];
+  const privatePackageByStudentId = new Map<
+    string,
+    (typeof privatePackages)[number]
+  >();
+  for (const pkg of privatePackages) {
+    if (!privatePackageByStudentId.has(pkg.studentId)) {
+      privatePackageByStudentId.set(pkg.studentId, pkg);
+    }
+  }
   for (const [studentId, count] of privateNeeds) {
-    const p = sessions.find((s) => s.studentId === studentId)?.student
-      ?.packages[0];
+    const p = privatePackageByStudentId.get(studentId);
     if (!p || p.quotaRemaining < count)
       issues.push({
         sessionId: "",
@@ -737,15 +847,35 @@ export async function reportCancellation(
 }
 
 const CANCEL_DAY_NAMES = [
-  "Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu",
+  "Minggu",
+  "Senin",
+  "Selasa",
+  "Rabu",
+  "Kamis",
+  "Jumat",
+  "Sabtu",
 ];
 const CANCEL_MONTH_NAMES = [
-  "Jan", "Feb", "Mar", "Apr", "Mei", "Jun",
-  "Jul", "Agu", "Sep", "Okt", "Nov", "Des",
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "Mei",
+  "Jun",
+  "Jul",
+  "Agu",
+  "Sep",
+  "Okt",
+  "Nov",
+  "Des",
 ];
 // start/end are nullable on TeachingSession (older pattern-derived rows may
 // lack an explicit override) — the time range is omitted when either is unset.
-function formatCancelledWhen(sessionDate: Date, startTime: Date | null, endTime: Date | null): string {
+function formatCancelledWhen(
+  sessionDate: Date,
+  startTime: Date | null,
+  endTime: Date | null,
+): string {
   const dateLabel = `${CANCEL_DAY_NAMES[sessionDate.getDay()]}, ${sessionDate.getDate()} ${CANCEL_MONTH_NAMES[sessionDate.getMonth()]} ${sessionDate.getFullYear()}`;
   if (!startTime || !endTime) return dateLabel;
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -812,17 +942,24 @@ export async function cancelScheduledSessionByAdmin(
 async function notifyOfCancellation(sessionId: string) {
   const session = await prisma.teachingSession.findUnique({
     where: { id: sessionId },
-    include: { subject: { select: { name: true } } },
+    include: {
+      subject: { select: { name: true } },
+      attendanceRecords: { select: { studentId: true } },
+    },
   });
   if (!session) return;
   const subject = session.subject?.name ? ` ${session.subject.name}` : "";
 
-  if (session.sessionType === "PRIVATE" && session.studentId) {
-    await notifyParentsOfStudent(session.studentId, {
-      title: "Sesi Dibatalkan Hari Ini",
-      message: `Sesi${subject} hari ini dibatalkan.`,
-      type: "SESSION_CANCELLED",
-    });
+  if (session.sessionType === "PRIVATE") {
+    await Promise.all(
+      resolvePrivateSessionParticipantIds(session).map((studentId) =>
+        notifyParentsOfStudent(studentId, {
+          title: "Sesi Dibatalkan Hari Ini",
+          message: `Sesi${subject} hari ini dibatalkan.`,
+          type: "SESSION_CANCELLED",
+        }),
+      ),
+    );
   } else if (session.sessionType === "REGULAR" && session.classId) {
     await notifyParentsOfClass(session.classId, (studentName) => ({
       title: "Sesi Dibatalkan Hari Ini",
@@ -918,7 +1055,14 @@ export async function listSessions(filters: {
       status: filters.status as any,
       sessionType: filters.sessionType as any,
       classId: filters.classId,
-      studentId: filters.studentId,
+      ...(filters.studentId
+        ? {
+            OR: [
+              { studentId: filters.studentId },
+              { attendanceRecords: { some: { studentId: filters.studentId } } },
+            ],
+          }
+        : {}),
       sessionDate:
         filters.startDate || filters.endDate
           ? { gte: filters.startDate, lte: filters.endDate }
@@ -947,7 +1091,14 @@ export async function listSessions(filters: {
       },
       changeRequests: {
         where: { status: "PENDING" },
-        select: { id: true, proposedDate: true, proposedStartTime: true, proposedEndTime: true, reason: true, status: true },
+        select: {
+          id: true,
+          proposedDate: true,
+          proposedStartTime: true,
+          proposedEndTime: true,
+          reason: true,
+          status: true,
+        },
         take: 1,
       },
     },

@@ -1,11 +1,11 @@
 "use client";
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import api from "@/lib/api";
 import Modal from "@/components/Modal";
 import PageHeader from "@/components/PageHeader";
 import SectionCard from "@/components/SectionCard";
 import EmptyState from "@/components/EmptyState";
+import AdminTableActions from "@/components/TableActionMenu";
 import { IconPlus, IconSearch } from "@/components/icons";
 type Subject = { id: string; name: string; isActive: boolean };
 type TutorSubject = { subject: Pick<Subject, "id" | "name"> };
@@ -36,7 +36,6 @@ export default function AdminTutorsPage() {
     [query, setQuery] = useState(""),
     [formError, setFormError] = useState(""),
     [saving, setSaving] = useState(false),
-    [menuTutorId, setMenuTutorId] = useState<string | null>(null),
     [removing, setRemoving] = useState<Tutor | null>(null),
     [deleteError, setDeleteError] = useState(""),
     [deleting, setDeleting] = useState(false),
@@ -86,6 +85,11 @@ export default function AdminTutorsPage() {
       return setFormError(
         "Nama, email, dan password minimal 6 karakter wajib diisi.",
       );
+    if (!form.phone) return setFormError("Nomor telepon wajib diisi.");
+    if (form.phone.length < 10 || form.phone.length > 13)
+      return setFormError(
+        "Nomor telepon harus terdiri dari 10–13 digit angka.",
+      );
     if (!form.subjectIds.length)
       return setFormError("Pilih minimal satu mata pelajaran.");
     setSaving(true);
@@ -129,11 +133,11 @@ export default function AdminTutorsPage() {
     <div className="space-y-5">
       <PageHeader
         title="Tentor"
-        description="Kelola data dan informasi pengajar Pioner Class."
+        description="Kelola data dan informasi pengajar Pioneer Class."
         action={
           <button
             onClick={openCreate}
-            className="inline-flex h-10 items-center gap-2 rounded-lg bg-navy-900 px-4 text-sm font-medium text-white"
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-navy-900 px-4 text-sm font-medium text-white hover:bg-navy-800"
           >
             <IconPlus className="h-4 w-4" />
             Tambah Tentor
@@ -174,18 +178,21 @@ export default function AdminTutorsPage() {
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[720px] text-sm">
-                  <thead className="bg-slate-50 text-left text-xs text-gray-500">
+                  <thead className="bg-slate-50 text-left text-xs font-medium text-gray-500">
                     <tr>
                       <th className="p-3">Tentor</th>
                       <th>Email</th>
                       <th>No. Telepon</th>
                       <th>Login Terakhir</th>
-                      <th className="p-3">Aksi</th>
+                      <th className="p-3 text-right">Aksi</th>
                     </tr>
                   </thead>
                   <tbody>
                     {visible.map((t) => (
-                      <tr key={t.id} className="border-t">
+                      <tr
+                        key={t.id}
+                        className="border-t border-gray-100 hover:bg-slate-50/70"
+                      >
                         <td className="p-3 font-medium">{t.name}</td>
                         <td>{t.user.email}</td>
                         <td>{t.phone || "-"}</td>
@@ -197,45 +204,16 @@ export default function AdminTutorsPage() {
                               }).format(new Date(t.user.lastLogin))
                             : "Belum pernah login"}
                         </td>
-                        <td className="p-3">
-                          <Link
-                            href={`/admin/tutors/${t.id}`}
-                            className="mr-3 text-xs text-blue-600"
-                          >
-                            Detail
-                          </Link>
-                          <Link
-                            href={`/admin/tutors/${t.id}/edit`}
-                            className="mr-3 text-xs text-blue-600"
-                          >
-                            Edit
-                          </Link>
-                          <span className="relative inline-block">
-                            <button
-                              aria-label={`Aksi untuk ${t.name}`}
-                              aria-expanded={menuTutorId === t.id}
-                              onClick={() =>
-                                setMenuTutorId(
-                                  menuTutorId === t.id ? null : t.id,
-                                )
-                              }
-                              className="rounded px-2 py-1 text-sm text-gray-600 hover:bg-slate-100"
-                            >
-                              ⋮
-                            </button>
-                            {menuTutorId === t.id && (
-                              <button
-                                onClick={() => {
-                                  setDeleteError("");
-                                  setMenuTutorId(null);
-                                  setRemoving(t);
-                                }}
-                                className="absolute right-0 z-10 mt-1 w-32 rounded-lg border bg-white px-3 py-2 text-left text-xs text-red-600 shadow-lg"
-                              >
-                                Hapus Tentor
-                              </button>
-                            )}
-                          </span>
+                        <td className="p-3 text-right">
+                          <AdminTableActions
+                            ariaLabel={`Aksi untuk ${t.name}`}
+                            detailHref={`/admin/tutors/${t.id}`}
+                            editHref={`/admin/tutors/${t.id}/edit`}
+                            onDelete={() => {
+                              setDeleteError("");
+                              setRemoving(t);
+                            }}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -260,9 +238,10 @@ export default function AdminTutorsPage() {
               change={(v) => setForm({ ...form, title: v })}
             />
             <Input
-              label="No. Telepon"
+              label="No. Telepon *"
               value={form.phone}
-              change={(v) => setForm({ ...form, phone: v })}
+              numeric
+              change={(phone) => setForm({ ...form, phone })}
             />
             <Input
               label="Email *"
@@ -386,11 +365,13 @@ function Input({
   value,
   change,
   type = "text",
+  numeric = false,
 }: {
   label: string;
   value: string;
   change: (v: string) => void;
   type?: string;
+  numeric?: boolean;
 }) {
   return (
     <label className="block text-sm">
@@ -398,7 +379,11 @@ function Input({
       <input
         type={type}
         value={value}
-        onChange={(e) => change(e.target.value)}
+        onChange={(e) =>
+          change(numeric ? e.target.value.replace(/\D/g, "") : e.target.value)
+        }
+        inputMode={numeric ? "numeric" : undefined}
+        pattern={numeric ? "[0-9]*" : undefined}
         className="mt-1 h-10 w-full rounded border px-3"
       />
     </label>

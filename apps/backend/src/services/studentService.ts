@@ -8,6 +8,9 @@ export async function createStudent(data: {
   email?: string;
   guardianName?: string;
   guardianPhone?: string;
+  nis?: string;
+  school?: string;
+  schoolClass?: string;
 }) {
   return prisma.student.create({ data: { ...data, status: "ACTIVE" } });
 }
@@ -103,16 +106,21 @@ export async function deleteStudentPermanently(id: string, adminId: string) {
     });
     if (!student) throw new AppError("Siswa tidak ditemukan", 404);
 
-    // AttendanceRecord stores studentId without a database FK. Clear both
-    // regular attendance rows for this student and any private-session rows
-    // before the Student is removed, while preserving the regular session.
-    await tx.attendanceRecord.deleteMany({ where: { studentId: id } });
-
-    // Delete student-specific private sessions first. Their SessionValidation,
-    // AttendanceRecord, and PrivatePackageUsage children are cascade-linked.
+    // Delete only private sessions owned solely by this student. A group
+    // private session can retain this student as the legacy primary id, but
+    // must survive for the other AttendanceRecord participants.
     await tx.teachingSession.deleteMany({
-      where: { studentId: id, sessionType: "PRIVATE" },
+      where: {
+        studentId: id,
+        sessionType: "PRIVATE",
+        NOT: { attendanceRecords: { some: { studentId: { not: id } } } },
+      },
     });
+
+    // AttendanceRecord stores studentId without a database FK. After group
+    // sessions have been protected above, remove this student's participant
+    // rows while preserving the shared teaching history for other students.
+    await tx.attendanceRecord.deleteMany({ where: { studentId: id } });
 
     // Private schedules belong to the individual student; deleting them also
     // clears any remaining schedule-owned sessions through the schema cascade.
@@ -185,6 +193,9 @@ export async function updateStudent(
     email: string;
     guardianName: string;
     guardianPhone: string;
+    nis: string;
+    school: string;
+    schoolClass: string;
     classId: string | null;
   }>,
 ) {

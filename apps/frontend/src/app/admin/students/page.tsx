@@ -8,6 +8,7 @@ import { formatDate } from "@/lib/format";
 import PageHeader from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
 import { IconPlus, IconSearch } from "@/components/icons";
+import AdminTableActions from "@/components/TableActionMenu";
 import StatCard from "@/components/StatCard";
 import { IconClasses, IconPrivate } from "@/components/icons";
 
@@ -17,6 +18,9 @@ interface Student {
   phone: string | null;
   guardianName: string | null;
   guardianPhone: string | null;
+  nis: string | null;
+  school: string | null;
+  schoolClass: string | null;
   status: string;
   hasOperationalHistory: boolean;
   programs: Array<{
@@ -71,7 +75,6 @@ export default function AdminStudentsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [programFilter, setProgramFilter] = useState("ALL");
-  const [actionMenuId, setActionMenuId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Student | null>(null);
   const [deleteAcknowledged, setDeleteAcknowledged] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
@@ -342,7 +345,6 @@ export default function AdminStudentsPage() {
   }
 
   async function openEdit(student: Student) {
-    setActionMenuId(null);
     setEditError(null);
     const [detailRes] = await Promise.all([
       api.get(`/students/${student.id}`),
@@ -485,7 +487,7 @@ export default function AdminStudentsPage() {
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
-        <table className="w-full min-w-[860px] text-sm">
+        <table className="w-full min-w-[980px] text-sm">
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50/80 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">
               <th className="px-5 py-3">Nama Siswa</th>
@@ -623,53 +625,16 @@ export default function AdminStudentsPage() {
                     <StatusBadge status={s.status} />
                   </td>
                   <td className="px-5 py-3 text-right">
-                    <div className="relative inline-block text-left">
-                      <button
-                        onClick={() =>
-                          setActionMenuId(actionMenuId === s.id ? null : s.id)
-                        }
-                        aria-label={`Aksi ${s.name}`}
-                        className="rounded-md px-2 py-1 text-lg leading-none text-gray-500 hover:bg-gray-100 hover:text-gray-800"
-                      >
-                        •••
-                      </button>
-                      {actionMenuId === s.id && (
-                        <div className="absolute right-0 z-10 mt-1 w-44 rounded-lg border border-gray-200 bg-white p-1 text-left shadow-lg">
-                          <Link
-                            href={`/admin/students/${s.id}`}
-                            className="block rounded-md px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
-                          >
-                            Detail
-                          </Link>
-                          <button
-                            onClick={() => openEdit(s)}
-                            className="block w-full rounded-md px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-50"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => {
-                              setActionMenuId(null);
-                              openPackages(s);
-                            }}
-                            className="block w-full rounded-md px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-50"
-                          >
-                            Kelola Paket Privat
-                          </button>
-                          <div className="my-1 border-t border-gray-100" />
-                          <button
-                            onClick={() => {
-                              setActionMenuId(null);
-                              setDeleteAcknowledged(false);
-                              setDeleteTarget(s);
-                            }}
-                            className="block w-full rounded-md px-3 py-2 text-left text-xs font-medium text-red-600 hover:bg-red-50"
-                          >
-                            Hapus
-                          </button>
-                        </div>
-                      )}
-                    </div>
+                    <AdminTableActions
+                      ariaLabel={`Aksi ${s.name}`}
+                      detailHref={`/admin/students/${s.id}`}
+                      onEdit={() => openEdit(s)}
+                      onManage={() => openPackages(s)}
+                      onDelete={() => {
+                        setDeleteAcknowledged(false);
+                        setDeleteTarget(s);
+                      }}
+                    />
                   </td>
                 </tr>
               ))

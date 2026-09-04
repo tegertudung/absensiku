@@ -25,6 +25,7 @@ import settingsRouter from './api/settings';
 import honorSlipRouter from './api/honorSlip';
 import parentsRouter from './api/parents';
 import parentPortalRouter from './api/parentPortal';
+import studentLettersRouter from './api/studentLetters';
 import { SETTINGS_UPLOAD_ROOT } from './middleware/settingsUpload';
 
 const app = express();
@@ -72,6 +73,7 @@ app.use('/api/settings', settingsRouter);
 app.use('/api/honor', honorSlipRouter);
 app.use('/api/parents', parentsRouter);
 app.use('/api/parent', parentPortalRouter);
+app.use('/api/student-letters', studentLettersRouter);
 
 // 404 handler
 app.use((req, res) => {

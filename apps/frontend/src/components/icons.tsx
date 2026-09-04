@@ -138,6 +138,10 @@ export function IconSearch({ className }: IconProps) {
   );
 }
 
+export function IconEye({ className }: IconProps) { return <svg {...base} className={className}><path d="M2.5 12s3.3-6 9.5-6 9.5 6 9.5 6-3.3 6-9.5 6-9.5-6-9.5-6Z" /><circle cx="12" cy="12" r="2.5" /></svg>; }
+export function IconPrint({ className }: IconProps) { return <svg {...base} className={className}><path d="M6 9V3h12v6M6 17H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2" /><path d="M6 14h12v7H6z" /></svg>; }
+export function IconTrash({ className }: IconProps) { return <svg {...base} className={className}><path d="M4 7h16M9 7V4h6v3M6.5 7l1 13h9l1-13M10 11v5M14 11v5" /></svg>; }
+
 export function IconHome({ className }: IconProps) {
   return (
     <svg {...base} className={className}>

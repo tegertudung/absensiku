@@ -4,7 +4,7 @@ import path from 'path';
 import { SETTINGS_UPLOAD_ROOT, SettingsImageKind, SettingsUploadedImage } from '../middleware/settingsUpload';
 
 export const DEFAULT_SETTINGS: Record<string, string> = {
-  systemName: 'Pioner Class', institutionName: 'Pioner Class', signatoryName: '', signatoryTitle: '', location: '', domain: '', logoPath: '', signaturePath: '', footerText: '',
+  systemName: 'Pioner Class', institutionName: 'Pioner Class', address: '', email: '', phone: '', signatoryName: '', signatoryTitle: '', location: '', domain: '', logoPath: '', signaturePath: '', footerText: '',
   minimumScheduleStartGapMinutes: '30', lowQuotaWarningThreshold: '3', zeroQuotaBlocking: 'true', dailyBatchCompletionEnabled: 'true',
 };
 export async function getSettings() {

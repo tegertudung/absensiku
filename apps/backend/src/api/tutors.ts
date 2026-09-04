@@ -15,6 +15,11 @@ import {
 
 const router = Router();
 
+const localPhoneSchema = z
+  .string()
+  .min(1, "Nomor telepon wajib diisi.")
+  .regex(/^\d{10,13}$/, "Nomor telepon harus terdiri dari 10–13 digit angka.");
+
 // GET /api/tutors/me — Tentor's own profile + subjects taught (Profil page).
 // Declared before /:id so "me" isn't swallowed by the :id param route.
 router.get(
@@ -25,12 +30,10 @@ router.get(
     try {
       const tutorId = await resolveTutorIdForUser(req.user!.userId);
       if (!tutorId) {
-        return res
-          .status(403)
-          .json({
-            error: "Forbidden",
-            message: "Akun Anda belum terhubung ke profil tentor",
-          });
+        return res.status(403).json({
+          error: "Forbidden",
+          message: "Akun Anda belum terhubung ke profil tentor",
+        });
       }
       res.json({ success: true, data: await getOwnTutorProfile(tutorId) });
     } catch (err) {
@@ -43,7 +46,7 @@ const createSchema = z.object({
   email: z.string().email("Email tidak valid"),
   password: z.string().min(6, "Password minimal 6 karakter"),
   name: z.string().min(2, "Nama minimal 2 karakter"),
-  phone: z.string().optional(),
+  phone: localPhoneSchema,
   hireDate: z.string().optional(),
   bankAccount: z.string().optional(),
   bankName: z.string().optional(),
@@ -62,12 +65,10 @@ router.post(
   async (req: Request, res: Response) => {
     const parsed = createSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res
-        .status(400)
-        .json({
-          error: "Validation error",
-          details: parsed.error.flatten().fieldErrors,
-        });
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
     }
 
     try {
@@ -121,7 +122,7 @@ router.get(
 
 const updateSchema = z.object({
   name: z.string().min(2).optional(),
-  phone: z.string().optional(),
+  phone: localPhoneSchema,
   hireDate: z.string().optional(),
   bankAccount: z.string().optional(),
   bankName: z.string().optional(),
@@ -142,12 +143,10 @@ router.put(
   async (req: Request, res: Response) => {
     const parsed = updateSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res
-        .status(400)
-        .json({
-          error: "Validation error",
-          details: parsed.error.flatten().fieldErrors,
-        });
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
     }
 
     try {

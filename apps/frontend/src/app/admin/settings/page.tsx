@@ -8,6 +8,9 @@ type Tab = "identity" | "operations" | "document";
 const initial: Settings = {
   systemName: "",
   institutionName: "",
+  address: "",
+  email: "",
+  phone: "",
   signatoryName: "",
   signatoryTitle: "",
   location: "",
@@ -155,6 +158,9 @@ export default function SettingsPage() {
               <div className="space-y-4">
                 {field("systemName", "Nama Sistem")}
                 {field("institutionName", "Nama Lembaga")}
+                {field("address", "Alamat")}
+                {field("email", "Email", "email")}
+                {field("phone", "Nomor Telepon")}
               </div>
               <Save
                 saving={saving}
@@ -162,6 +168,9 @@ export default function SettingsPage() {
                   save("identity", {
                     systemName: settings.systemName,
                     institutionName: settings.institutionName,
+                    address: settings.address,
+                    email: settings.email,
+                    phone: settings.phone,
                   })
                 }
               />
@@ -217,8 +226,8 @@ export default function SettingsPage() {
                         className="h-10 object-contain"
                       />
                     ) : (
-                      <span className="font-serif italic">
-                        {settings.signatoryName || "Tanda tangan"}
+                      <span className="text-xs text-gray-500">
+                        Belum ada tanda tangan diunggah.
                       </span>
                     )}
                     <input

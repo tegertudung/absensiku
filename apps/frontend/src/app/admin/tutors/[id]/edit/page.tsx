@@ -16,6 +16,13 @@ type Tutor = {
   subjects: { subject: { id: string; name: string } }[];
 };
 
+function toLocalPhone(phone: string | null) {
+  const value = phone || "";
+  return value.startsWith("+62")
+    ? `0${value.slice(3).replace(/^0+/, "")}`
+    : value.replace(/\D/g, "");
+}
+
 export default function EditTutorPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -47,7 +54,7 @@ export default function EditTutorPage() {
         setForm({
           name: loadedTutor.name,
           title: loadedTutor.title || "",
-          phone: loadedTutor.phone || "",
+          phone: toLocalPhone(loadedTutor.phone),
           subjectIds: loadedTutor.subjects.map((item) => item.subject.id),
         });
       } catch {
@@ -77,6 +84,9 @@ export default function EditTutorPage() {
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!form.name.trim()) return setError("Nama tentor wajib diisi.");
+    if (!form.phone) return setError("Nomor telepon wajib diisi.");
+    if (form.phone.length < 10 || form.phone.length > 13)
+      return setError("Nomor telepon harus terdiri dari 10–13 digit angka.");
     if (!form.subjectIds.length)
       return setError("Pilih minimal satu mata pelajaran.");
 
@@ -86,7 +96,7 @@ export default function EditTutorPage() {
       await api.put(`/tutors/${id}`, {
         name: form.name.trim(),
         title: form.title || undefined,
-        phone: form.phone || undefined,
+        phone: form.phone,
         subjectIds: form.subjectIds,
       });
       router.push(`/admin/tutors/${id}`);
@@ -130,12 +140,17 @@ export default function EditTutorPage() {
               className="h-10 w-full rounded-lg border px-3 text-sm"
             />
           </FormField>
-          <FormField label="No. Telepon">
+          <FormField label="No. Telepon *">
             <input
               value={form.phone}
               onChange={(event) =>
-                setForm({ ...form, phone: event.target.value })
+                setForm({
+                  ...form,
+                  phone: event.target.value.replace(/\D/g, ""),
+                })
               }
+              inputMode="numeric"
+              pattern="[0-9]*"
               className="h-10 w-full rounded-lg border px-3 text-sm"
             />
           </FormField>

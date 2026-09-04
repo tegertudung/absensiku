@@ -7,6 +7,8 @@ import SectionCard from "@/components/SectionCard";
 import EmptyState from "@/components/EmptyState";
 import { formatDate, formatRupiah } from "@/lib/format";
 import { IconPlus } from "@/components/icons";
+import { StatusBadge } from "@/components/StatusBadge";
+import AdminTableActions from "@/components/TableActionMenu";
 type P = {
   id: string;
   code: string;
@@ -31,11 +33,23 @@ type H = {
   newNominal: string;
   changedAt: string;
   reason?: string | null;
-  rate: { program?: P | null };
+  rate: {
+    program?: P | null;
+    nominal?: string;
+    effectiveFrom?: string;
+    effectiveTo?: string | null;
+    status?: string;
+  };
 };
 const core = (p: P) => p.code === "REGULAR" || p.code === "PRIVATE";
 const model = (p: P) =>
   p.learningModel === "CLASS_BASED" ? "Berbasis Kelas" : "Individual";
+const formatProgramDate = (value: string) =>
+  new Intl.DateTimeFormat("id-ID", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(value));
 const empty = {
   name: "",
   code: "",
@@ -57,12 +71,12 @@ export default function AdminHonorRatesPage() {
     [error, setError] = useState(""),
     [notice, setNotice] = useState(""),
     [filter, setFilter] = useState(""),
-    [menu, setMenu] = useState<string | null>(null),
+    [query, setQuery] = useState(""),
+    [statusFilter, setStatusFilter] = useState("ALL"),
     [programOpen, setProgramOpen] = useState(false),
     [editing, setEditing] = useState<P | null>(null),
     [detail, setDetail] = useState<P | null>(null),
     [deactivate, setDeactivate] = useState<P | null>(null),
-    [deleting, setDeleting] = useState<P | null>(null),
     [rateProgram, setRateProgram] = useState<P | null>(null),
     [saving, setSaving] = useState(false),
     [form, setForm] = useState(empty),
@@ -105,8 +119,16 @@ export default function AdminHonorRatesPage() {
         new Date(r.effectiveFrom) > today,
     );
   const visible = useMemo(
-    () => programs.filter((p) => !filter || p.id === filter),
-    [programs, filter],
+    () =>
+      programs.filter(
+        (p) =>
+          (!filter || p.id === filter) &&
+          (statusFilter === "ALL" ||
+            (statusFilter === "ACTIVE" ? p.isActive : !p.isActive)) &&
+          (!query ||
+            `${p.name} ${p.code}`.toLowerCase().includes(query.toLowerCase())),
+      ),
+    [filter, programs, query, statusFilter],
   );
   const active = rates.filter(
     (r) =>
@@ -185,26 +207,6 @@ export default function AdminHonorRatesPage() {
       setSaving(false);
     }
   }
-  async function remove(p: P) {
-    setSaving(true);
-    try {
-      await api.delete(`/programs/${p.id}`);
-      setDeleting(null);
-      setDetail(null);
-      setNotice("Program berhasil dihapus.");
-      await load();
-    } catch (e: any) {
-      setDeleting(null);
-      setError(
-        err(
-          e,
-          "Program tidak dapat dihapus karena sudah digunakan pada data operasional. Nonaktifkan program jika sudah tidak ingin digunakan.",
-        ),
-      );
-    } finally {
-      setSaving(false);
-    }
-  }
   async function saveRate(e: React.FormEvent) {
     e.preventDefault();
     if (
@@ -236,11 +238,11 @@ export default function AdminHonorRatesPage() {
     <div className="space-y-5">
       <PageHeader
         title="Program"
-        description="Kelola program pembelajaran dan tarif honor tentor."
+        description="Kelola program pembelajaran, kuota pertemuan, dan tarif honor tentor."
         action={
           <button
             onClick={() => open()}
-            className="inline-flex h-10 items-center gap-2 rounded-lg bg-navy-900 px-4 text-sm font-medium text-white"
+            className="inline-flex h-10 items-center gap-2 rounded-lg bg-navy-900 px-4 text-sm font-medium text-white hover:bg-navy-800"
           >
             <IconPlus className="h-4 w-4" />
             Tambah Program
@@ -263,12 +265,28 @@ export default function AdminHonorRatesPage() {
       )}
       <SectionCard
         title="Daftar Program"
-        description="Kelola program pembelajaran yang tersedia di Pioner Class."
-        action={
+        description="Kelola program pembelajaran yang tersedia di Pioneer Class."
+      >
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Cari program..."
+            className="h-10 min-w-[220px] flex-1 rounded-lg border border-gray-300 px-3 text-sm outline-none focus:border-navy-500 focus:ring-2 focus:ring-navy-100"
+          />
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700"
+          >
+            <option value="ALL">Semua Status</option>
+            <option value="ACTIVE">Aktif</option>
+            <option value="INACTIVE">Nonaktif</option>
+          </select>
           <select
             value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="h-9 rounded-md border border-gray-300 px-3 text-xs"
+            onChange={(event) => setFilter(event.target.value)}
+            className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700"
           >
             <option value="">Semua Program</option>
             {programs.map((p) => (
@@ -277,8 +295,7 @@ export default function AdminHonorRatesPage() {
               </option>
             ))}
           </select>
-        }
-      >
+        </div>
         {loading ? (
           <div className="h-36 animate-pulse rounded-md bg-slate-100" />
         ) : visible.length === 0 ? (
@@ -292,89 +309,67 @@ export default function AdminHonorRatesPage() {
               <thead>
                 <tr className="border-b bg-slate-50 text-left text-xs font-semibold text-gray-500">
                   <th className="px-4 py-3">Program</th>
-                  <th>Model</th>
-                  <th>Kuota</th>
-                  <th>Honor / Sesi</th>
-                  <th>Berlaku Mulai</th>
-                  <th>Status</th>
+                  <th className="px-4 py-3">Model</th>
+                  <th className="px-4 py-3">Kuota Default</th>
+                  <th className="px-4 py-3">Honor / Sesi</th>
+                  <th className="px-4 py-3">Berlaku Mulai</th>
+                  <th className="px-4 py-3">Status</th>
                   <th className="px-4 py-3 text-right">Aksi</th>
                 </tr>
               </thead>
               <tbody>
                 {visible.map((p) => {
-                  const r = core(p) ? current(p) : undefined;
+                  const r = current(p);
                   return (
-                    <tr key={p.id} className="border-b border-gray-100">
+                    <tr
+                      key={p.id}
+                      className="border-b border-gray-100 hover:bg-slate-50/70"
+                    >
                       <td className="px-4 py-3 font-medium">
                         {p.name}
                         <small className="block text-xs text-gray-500">
                           {p.code}
                         </small>
                       </td>
-                      <td>{model(p)}</td>
-                      <td>
+                      <td className="px-4 py-3">{model(p)}</td>
+                      <td className="px-4 py-3">
                         {p.usesQuota
                           ? `${p.defaultMeetingQuota} pertemuan`
                           : "Tanpa kuota"}
                       </td>
-                      <td>{r ? formatRupiah(r.nominal) : "—"}</td>
-                      <td>{r ? formatDate(r.effectiveFrom) : "—"}</td>
-                      <td>
-                        <Badge active={p.isActive} />
+                      <td
+                        className={`px-4 py-3 ${
+                          r ? "font-medium text-gray-900" : "text-gray-400"
+                        }`}
+                      >
+                        {r ? formatRupiah(r.nominal) : "Belum diatur"}
+                      </td>
+                      <td
+                        className={`px-4 py-3 ${
+                          r ? "text-gray-700" : "text-gray-400"
+                        }`}
+                      >
+                        {r
+                          ? formatProgramDate(r.effectiveFrom)
+                          : "Belum diatur"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge
+                          status={p.isActive ? "ACTIVE" : "INACTIVE"}
+                        />
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <div className="relative inline-block">
-                          <button
-                            onClick={() => setMenu(menu === p.id ? null : p.id)}
-                            className="rounded-md px-2 py-1 text-lg text-gray-500"
-                          >
-                            •••
-                          </button>
-                          {menu === p.id && (
-                            <div className="absolute right-0 z-10 mt-1 w-44 rounded-md border bg-white p-1 text-left shadow-lg">
-                              <button
-                                onClick={() => {
-                                  setDetail(p);
-                                  setMenu(null);
-                                }}
-                                className="item"
-                              >
-                                Lihat Detail
-                              </button>
-                              <button
-                                onClick={() => {
-                                  open(p);
-                                  setMenu(null);
-                                }}
-                                className="item"
-                              >
-                                Edit Program
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setMenu(null);
-                                  p.isActive ? setDeactivate(p) : status(p);
-                                }}
-                                className="item"
-                              >
-                                {p.isActive
-                                  ? "Nonaktifkan Program"
-                                  : "Aktifkan Program"}
-                              </button>
-                              {!core(p) && (
-                                <button
-                                  onClick={() => {
-                                    setDeleting(p);
-                                    setMenu(null);
-                                  }}
-                                  className="item text-red-600"
-                                >
-                                  Hapus Program
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
+                        <AdminTableActions
+                          ariaLabel={`Aksi untuk ${p.name}`}
+                          onDetail={() => setDetail(p)}
+                          onEdit={() => open(p)}
+                          menuActionLabel={
+                            p.isActive
+                              ? "Nonaktifkan Program"
+                              : "Aktifkan Program"
+                          }
+                          onMenuAction={() => setDeactivate(p)}
+                        />
                       </td>
                     </tr>
                   );
@@ -389,23 +384,49 @@ export default function AdminHonorRatesPage() {
         description="Riwayat perubahan tarif honor berdasarkan program dan tanggal berlaku."
       >
         {history.length ? (
-          <div className="divide-y">
-            {history.map((h) => (
-              <div
-                key={h.id}
-                className="grid gap-2 py-3 text-sm md:grid-cols-[130px_1fr_180px]"
-              >
-                <p>{formatDate(h.changedAt)}</p>
-                <div>
-                  <b>{h.rate.program?.name || "—"}</b>
-                  <p className="text-xs">
-                    {h.oldNominal ? `${formatRupiah(h.oldNominal)} → ` : ""}
-                    {formatRupiah(h.newNominal)}
-                  </p>
-                </div>
-                <p className="text-xs">{h.reason || "Tarif diperbarui"}</p>
-              </div>
-            ))}
+          <div className="overflow-x-auto rounded-lg border border-gray-200">
+            <table className="w-full min-w-[720px] text-sm">
+              <thead>
+                <tr className="border-b border-gray-200 bg-slate-50 text-left text-xs font-semibold text-gray-500">
+                  <th className="px-4 py-3">Program</th>
+                  <th className="px-4 py-3">Honor / Sesi</th>
+                  <th className="px-4 py-3">Berlaku Mulai</th>
+                  <th className="px-4 py-3">Berlaku Sampai</th>
+                  <th className="px-4 py-3">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((h) => (
+                  <tr
+                    key={h.id}
+                    className="border-b border-gray-100 last:border-0 hover:bg-slate-50/70"
+                  >
+                    <td className="px-4 py-3 font-medium text-gray-900">
+                      {h.rate.program?.name || "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      {h.oldNominal ? `${formatRupiah(h.oldNominal)} → ` : ""}
+                      {formatRupiah(h.newNominal)}
+                    </td>
+                    <td className="px-4 py-3 text-gray-700">
+                      {formatProgramDate(h.rate.effectiveFrom || h.changedAt)}
+                    </td>
+                    <td className="px-4 py-3 text-gray-700">
+                      {h.rate.effectiveTo
+                        ? formatProgramDate(h.rate.effectiveTo)
+                        : "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      {h.rate.status ? (
+                        <StatusBadge status={h.rate.status} />
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : (
           <EmptyState message="Belum ada riwayat perubahan tarif." />
@@ -495,7 +516,7 @@ export default function AdminHonorRatesPage() {
             />
             <div className="border-t pt-4">
               <h4 className="font-semibold">Tarif Honor</h4>
-              {core(detail) ? (
+              {current(detail) || futures(detail).length ? (
                 <>
                   <Info
                     label="Tarif Berlaku"
@@ -512,15 +533,17 @@ export default function AdminHonorRatesPage() {
                       value={`${formatRupiah(r.nominal)} · ${formatDate(r.effectiveFrom)}`}
                     />
                   ))}
-                  <button
-                    onClick={() => {
-                      setRateForm({ nominal: "", effectiveFrom: "" });
-                      setRateProgram(detail);
-                    }}
-                    className="mt-4 rounded-md bg-navy-900 px-4 py-2 text-sm text-white"
-                  >
-                    + Atur Tarif Baru
-                  </button>
+                  {core(detail) && (
+                    <button
+                      onClick={() => {
+                        setRateForm({ nominal: "", effectiveFrom: "" });
+                        setRateProgram(detail);
+                      }}
+                      className="mt-4 rounded-md bg-navy-900 px-4 py-2 text-sm text-white"
+                    >
+                      + Atur Tarif Baru
+                    </button>
+                  )}
                   <div className="mt-4 text-xs">
                     {history
                       .filter((h) => h.rate.program?.id === detail.id)
@@ -575,23 +598,16 @@ export default function AdminHonorRatesPage() {
       )}
       {deactivate && (
         <Confirm
-          title="Nonaktifkan Program?"
-          text="Program akan ditandai sebagai tidak aktif dan tetap tersimpan dalam sistem."
-          action="Nonaktifkan"
+          title={`${deactivate.isActive ? "Nonaktifkan" : "Aktifkan"} Program?`}
+          text={
+            deactivate.isActive
+              ? "Program tidak dapat digunakan untuk data baru selama berstatus nonaktif."
+              : "Program dapat digunakan kembali untuk data baru."
+          }
+          action={deactivate.isActive ? "Nonaktifkan" : "Aktifkan"}
           saving={saving}
           cancel={() => setDeactivate(null)}
           confirm={() => status(deactivate)}
-        />
-      )}{" "}
-      {deleting && (
-        <Confirm
-          title="Hapus Program?"
-          text="Program akan dihapus secara permanen jika belum pernah digunakan pada data operasional. Tindakan ini tidak dapat dibatalkan."
-          action="Hapus Program"
-          saving={saving}
-          danger
-          cancel={() => setDeleting(null)}
-          confirm={() => remove(deleting)}
         />
       )}
     </div>
@@ -610,15 +626,6 @@ function Notice({ text }: { text: string }) {
     <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
       {text}
     </p>
-  );
-}
-function Badge({ active }: { active: boolean }) {
-  return (
-    <span
-      className={`rounded-full px-2 py-0.5 text-xs ${active ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-600"}`}
-    >
-      {active ? "Aktif" : "Nonaktif"}
-    </span>
   );
 }
 function Info({ label, value }: { label: string; value: string }) {

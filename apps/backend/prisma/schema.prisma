@@ -99,6 +99,11 @@ model Student {
   email         String?
   guardianName  String?
   guardianPhone String?
+  // Administrative identity used by formal student letters. These remain
+  // optional so existing student records remain valid after the migration.
+  nis           String?
+  school        String?
+  schoolClass   String?
   status        String   @default("ACTIVE") // 'ACTIVE' | 'INACTIVE' | 'GRADUATED'
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -108,8 +113,51 @@ model Student {
   schedules   Schedule[]
   enrollments ClassEnrollment[]
   parentLinks ParentStudent[]
+  letters     StudentLetter[]
 
   @@index([status])
+}
+
+// Administrative documents only. These records are deliberately isolated
+// from academic schedules, teaching sessions, attendance, packages and honor.
+model StudentLetter {
+  id                 String                  @id @default(uuid())
+  studentId          String
+  letterNumber       String
+  letterDate         DateTime
+  studentName        String
+  studentNis         String
+  studentSchool      String
+  studentSchoolClass String
+  programName        String
+  startDate          DateTime
+  endDate            DateTime
+  verificationCode   String                  @unique
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  student   Student                 @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  schedules StudentLetterSchedule[]
+
+  @@index([studentId])
+  @@index([letterNumber])
+  @@index([letterDate])
+}
+
+model StudentLetterSchedule {
+  id              String        @id @default(uuid())
+  studentLetterId String
+  meetingNumber   Int
+  date            DateTime
+  startTime       String
+  endTime         String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  studentLetter StudentLetter @relation(fields: [studentLetterId], references: [id], onDelete: Cascade)
+
+  @@unique([studentLetterId, meetingNumber])
+  @@index([studentLetterId])
 }
 
 // ============================================

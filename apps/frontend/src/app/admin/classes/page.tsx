@@ -6,6 +6,7 @@ import Modal from "@/components/Modal";
 import PageHeader from "@/components/PageHeader";
 import SectionCard from "@/components/SectionCard";
 import EmptyState from "@/components/EmptyState";
+import AdminTableActions from "@/components/TableActionMenu";
 import { IconPlus, IconReport } from "@/components/icons";
 
 type Subject = {
@@ -265,7 +266,7 @@ export default function AdminClassesPage() {
               <tr className="border-b border-gray-200 bg-slate-50 text-left text-xs text-gray-500">
                 <th className="px-4 py-3 font-medium">Nama</th>
                 <th className="px-4 py-3 font-medium">Deskripsi</th>
-                <th className="px-4 py-3 font-medium">Aksi</th>
+                <th className="px-4 py-3 text-right font-medium">Aksi</th>
               </tr>
             </thead>
             <tbody>
@@ -281,29 +282,20 @@ export default function AdminClassesPage() {
                     <td className="px-4 py-3 text-gray-600">
                       {subject.description || "-"}
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex gap-3 text-xs font-medium">
-                        <button
-                          onClick={() => {
-                            setSubjectForm({
-                              id: subject.id,
-                              name: subject.name,
-                              description: subject.description || "",
-                            });
-                            setSubjectError(null);
-                            setSubjectModal(true);
-                          }}
-                          className="text-navy-900 hover:underline"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => deleteSubject(subject)}
-                          className="text-red-600 hover:underline"
-                        >
-                          Hapus
-                        </button>
-                      </div>
+                    <td className="px-4 py-3 text-right">
+                      <AdminTableActions
+                        ariaLabel={`Aksi untuk ${subject.name}`}
+                        onEdit={() => {
+                          setSubjectForm({
+                            id: subject.id,
+                            name: subject.name,
+                            description: subject.description || "",
+                          });
+                          setSubjectError(null);
+                          setSubjectModal(true);
+                        }}
+                        onDelete={() => deleteSubject(subject)}
+                      />
                     </td>
                   </tr>
                 ))
@@ -343,7 +335,7 @@ export default function AdminClassesPage() {
                   <th className="px-4 py-3 font-medium">Jenjang</th>
                   <th className="px-4 py-3 font-medium">Jumlah Siswa</th>
                   <th className="px-4 py-3 font-medium">Sisa Pertemuan</th>
-                  <th className="px-4 py-3 font-medium">Aksi</th>
+                  <th className="px-4 py-3 text-right font-medium">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -366,30 +358,16 @@ export default function AdminClassesPage() {
                     >
                       {item.quotaRemaining} / {item.quotaTotal}
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex gap-3 text-xs font-medium">
-                        <button
-                          onClick={() => openDetail(item)}
-                          className="text-navy-900 hover:underline"
-                        >
-                          Detail
-                        </button>
-                        <button
-                          onClick={() => openEditClass(item)}
-                          className="text-gray-700 hover:underline"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => {
-                            setClassError(null);
-                            setDeleteTarget(item);
-                          }}
-                          className="text-red-600 hover:underline"
-                        >
-                          Hapus
-                        </button>
-                      </div>
+                    <td className="px-4 py-3 text-right">
+                      <AdminTableActions
+                        ariaLabel={`Aksi untuk ${item.name}`}
+                        onDetail={() => openDetail(item)}
+                        onEdit={() => openEditClass(item)}
+                        onDelete={() => {
+                          setClassError(null);
+                          setDeleteTarget(item);
+                        }}
+                      />
                     </td>
                   </tr>
                 ))}
