@@ -17,6 +17,7 @@ import schedulesRouter from './api/schedules';
 import dashboardRouter from './api/dashboard';
 import privatePackagesRouter from './api/privatePackages';
 import { startOverdueSessionLockJob } from './jobs/lockOverdueSessions';
+import { startSessionReminderJob } from './jobs/sessionReminders';
 import auditLogsRouter from './api/auditLogs';
 import notificationsRouter from './api/notifications';
 import pushRouter from './api/push';
@@ -107,6 +108,7 @@ app.listen(PORT, () => {
   `);
 
   startOverdueSessionLockJob();
+  startSessionReminderJob();
 });
 
 process.on('unhandledRejection', (reason: Error) => {

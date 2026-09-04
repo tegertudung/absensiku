@@ -340,6 +340,11 @@ model TeachingSession {
   score                 Decimal?
   notes                 String?
   completedAt           DateTime?
+  // Notifikasi Tentor (pengingat H-2 jam / H-1 jam): set once that reminder
+  // has actually been sent so the sweep job (jobs/sessionReminders.ts) never
+  // double-sends, even across restarts or a missed cron tick.
+  reminder2hSentAt      DateTime?
+  reminder1hSentAt      DateTime?
   createdBy             String?
   createdAt             DateTime  @default(now())
   updatedBy             String?
