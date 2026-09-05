@@ -13,6 +13,7 @@ import {
   updateSchedule,
   setScheduleStatus,
   findScheduleConflicts,
+  repairLegacyOccurrencePrograms,
 } from "../services/scheduleService";
 
 const router = Router();
@@ -25,6 +26,9 @@ const dateString = z
 function combineDateTime(baseDate: string, time: string): Date {
   return new Date(`${baseDate}T${time}:00`);
 }
+function localDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
 
 // Notifikasi Tentor (siklus Pertemuan): "when" formatters mirror the style
 // already used for schedule-pattern notifications (day name + time range),
@@ -32,13 +36,33 @@ function combineDateTime(baseDate: string, time: string): Date {
 // Fire-and-forget everywhere they're used (`.catch` + log) — a notification
 // failure must never fail the underlying meeting create/edit/cancel/delete.
 const MEETING_DAY_NAMES = [
-  "Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu",
+  "Minggu",
+  "Senin",
+  "Selasa",
+  "Rabu",
+  "Kamis",
+  "Jumat",
+  "Sabtu",
 ];
 const MEETING_MONTH_NAMES = [
-  "Jan", "Feb", "Mar", "Apr", "Mei", "Jun",
-  "Jul", "Agu", "Sep", "Okt", "Nov", "Des",
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "Mei",
+  "Jun",
+  "Jul",
+  "Agu",
+  "Sep",
+  "Okt",
+  "Nov",
+  "Des",
 ];
-function formatMeetingWhen(sessionDate: string, startTime: string, endTime: string): string {
+function formatMeetingWhen(
+  sessionDate: string,
+  startTime: string,
+  endTime: string,
+): string {
   const d = new Date(`${sessionDate}T00:00:00`);
   return `${MEETING_DAY_NAMES[d.getDay()]}, ${d.getDate()} ${MEETING_MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}, ${startTime}–${endTime}`;
 }
@@ -46,14 +70,23 @@ function formatMeetingWhen(sessionDate: string, startTime: string, endTime: stri
 // read an existing record instead of a freshly-parsed request body). start/end
 // are nullable on TeachingSession (older pattern-derived rows may lack an
 // explicit override), so the time range is just omitted when either is unset.
-function formatMeetingWhenFromRecord(sessionDate: Date, startTime: Date | null, endTime: Date | null): string {
+function formatMeetingWhenFromRecord(
+  sessionDate: Date,
+  startTime: Date | null,
+  endTime: Date | null,
+): string {
   const dateLabel = `${MEETING_DAY_NAMES[sessionDate.getDay()]}, ${sessionDate.getDate()} ${MEETING_MONTH_NAMES[sessionDate.getMonth()]} ${sessionDate.getFullYear()}`;
   if (!startTime || !endTime) return dateLabel;
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${dateLabel}, ${pad(startTime.getHours())}:${pad(startTime.getMinutes())}–${pad(endTime.getHours())}:${pad(endTime.getMinutes())}`;
 }
 function notifyTutorOfMeeting(userId: string, title: string, when: string) {
-  createNotification({ userId, title, message: when, type: "SCHEDULE_CHANGE" }).catch((err) =>
+  createNotification({
+    userId,
+    title,
+    message: when,
+    type: "SCHEDULE_CHANGE",
+  }).catch((err) =>
     console.error("[notify] meeting tutor notification failed:", err),
   );
 }
@@ -64,6 +97,7 @@ const createSchema = z.object({
   // still must supply it (enforced below, not by the schema).
   tutorId: z.string().uuid("tutorId harus UUID valid").optional(),
   sessionType: z.enum(["REGULAR", "PRIVATE"]),
+  programId: z.string().uuid("Program wajib diisi"),
   classId: z.string().uuid().optional(),
   studentId: z.string().uuid().optional(),
   subjectId: z.string().uuid().optional(),
@@ -122,6 +156,7 @@ router.post("/", requireAuth, async (req: Request, res: Response) => {
     const schedule = await createSchedule({
       tutorId: tutorId!,
       sessionType: d.sessionType,
+      programId: d.programId,
       classId: d.classId,
       studentId: d.studentId,
       subjectId: d.subjectId,
@@ -202,6 +237,7 @@ router.get("/", requireAuth, async (req: Request, res: Response) => {
   }
 
   try {
+    await repairLegacyOccurrencePrograms();
     const schedules = await listSchedules({
       tutorId: scopedTutorId,
       sessionType: typeof sessionType === "string" ? sessionType : undefined,
@@ -227,6 +263,8 @@ const patternSlotSchema = z
 
 const patternSchema = z
   .object({
+    programId: z.string().uuid("Program wajib dipilih"),
+    startDate: dateString,
     slots: z
       .array(patternSlotSchema)
       .min(1, "Minimal satu hari jadwal diperlukan."),
@@ -245,13 +283,47 @@ const patternSchema = z
     });
   });
 
-// Patterns are deliberately separate from legacy recurring assignments. They
-// contain only class and time; Tutor/Subject are selected on TeachingSession.
+type PersistedPatternSlot = {
+  patternId: string;
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+};
+
+function nextPatternDates(
+  startDate: string,
+  slots: PersistedPatternSlot[],
+  count: number,
+) {
+  const from = new Date(`${startDate}T00:00:00`);
+  const ordered = [...slots].sort(
+    (a, b) =>
+      a.dayOfWeek - b.dayOfWeek || a.startTime.localeCompare(b.startTime),
+  );
+  const dates: Array<{ date: Date; slot: (typeof ordered)[number] }> = [];
+  for (let offset = 0; dates.length < count && offset < 3660; offset++) {
+    const date = new Date(from);
+    date.setDate(from.getDate() + offset);
+    for (const slot of ordered) {
+      if (date.getDay() === slot.dayOfWeek) dates.push({ date, slot });
+      if (dates.length === count) break;
+    }
+  }
+  return dates;
+}
+
+// Patterns are templates only. Each generated class meeting is a real Schedule
+// occurrence, linked through patternId and safe to edit independently.
 router.get("/patterns", requireAuth, async (_req: Request, res: Response) => {
   try {
     const patterns = await prisma.schedule.findMany({
       where: { isPattern: true, sessionType: "REGULAR", status: "ACTIVE" },
-      include: { class: { select: { id: true, name: true, level: true } } },
+      include: {
+        class: { select: { id: true, name: true, level: true } },
+        program: {
+          select: { id: true, name: true, defaultMeetingQuota: true },
+        },
+      },
       orderBy: [{ classId: "asc" }, { dayOfWeek: "asc" }, { startTime: "asc" }],
     });
     res.json({ success: true, data: patterns });
@@ -273,13 +345,32 @@ router.put(
       });
     try {
       const result = await prisma.$transaction(async (tx) => {
-        const kelas = await tx.class.findFirst({
-          where: { id: req.params.classId, status: "ACTIVE" },
-        });
+        const [kelas, program] = await Promise.all([
+          tx.class.findFirst({
+            where: { id: req.params.classId, status: "ACTIVE" },
+          }),
+          tx.program.findFirst({
+            where: {
+              id: parsed.data.programId,
+              isActive: true,
+              learningModel: "CLASS_BASED",
+            },
+          }),
+        ]);
         if (!kelas)
           throw new AppError("Kelas tidak ditemukan atau tidak aktif.", 404);
-        const existing = await tx.schedule.findMany({
-          where: { classId: kelas.id, isPattern: true },
+        if (!program)
+          throw new AppError(
+            "Program kelas tidak ditemukan atau tidak aktif.",
+            404,
+          );
+        if (!program.usesQuota)
+          throw new AppError(
+            "Program tanpa kuota belum mendukung generate otomatis. Tentukan pertemuan manual.",
+            422,
+          );
+        const existingPatternSchedules = await tx.schedule.findMany({
+          where: { classId: kelas.id, programId: program.id, isPattern: true },
           select: { id: true, dayOfWeek: true, startTime: true, endTime: true },
         });
         const base = new Date("1970-01-01T00:00:00");
@@ -289,12 +380,15 @@ router.put(
             slot,
           ]),
         );
-        for (const pattern of existing) {
+        for (const pattern of existingPatternSchedules) {
           const key = `${pattern.dayOfWeek}-${String(pattern.startTime.getHours()).padStart(2, "0")}:${String(pattern.startTime.getMinutes()).padStart(2, "0")}-${String(pattern.endTime.getHours()).padStart(2, "0")}:${String(pattern.endTime.getMinutes()).padStart(2, "0")}`;
           if (wanted.has(key)) {
             await tx.schedule.update({
               where: { id: pattern.id },
-              data: { status: "ACTIVE" },
+              data: {
+                status: "ACTIVE",
+                startDate: new Date(`${parsed.data.startDate}T00:00:00`),
+              },
             });
             wanted.delete(key);
             continue;
@@ -313,6 +407,7 @@ router.put(
           await tx.schedule.create({
             data: {
               classId: kelas.id,
+              programId: program.id,
               sessionType: "REGULAR",
               dayOfWeek: slot.dayOfWeek,
               startTime: combineDateTime("1970-01-01", slot.startTime),
@@ -323,11 +418,85 @@ router.put(
             },
           });
         }
-        return tx.schedule.findMany({
-          where: { classId: kelas.id, isPattern: true },
+        const patterns = await tx.schedule.findMany({
+          where: {
+            classId: kelas.id,
+            programId: program.id,
+            isPattern: true,
+            status: "ACTIVE",
+          },
           include: { class: { select: { id: true, name: true } } },
           orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
         });
+        const existingOccurrences = await tx.schedule.findMany({
+          where: { patternId: { in: patterns.map((pattern) => pattern.id) } },
+          select: {
+            id: true,
+            patternId: true,
+            occurrenceDate: true,
+            startTime: true,
+            endTime: true,
+            dayOfWeek: true,
+          },
+        });
+        const existingKeys = new Set(
+          existingOccurrences.map(
+            (row) =>
+              `${row.patternId}:${row.occurrenceDate ? localDateKey(row.occurrenceDate) : ""}:${String(row.startTime.getHours()).padStart(2, "0")}:${String(row.startTime.getMinutes()).padStart(2, "0")}`,
+          ),
+        );
+        const slotsWithPattern: PersistedPatternSlot[] = patterns.map(
+          (pattern) => ({
+            dayOfWeek: pattern.dayOfWeek,
+            startTime: `${String(pattern.startTime.getHours()).padStart(2, "0")}:${String(pattern.startTime.getMinutes()).padStart(2, "0")}`,
+            endTime: `${String(pattern.endTime.getHours()).padStart(2, "0")}:${String(pattern.endTime.getMinutes()).padStart(2, "0")}`,
+            patternId: pattern.id,
+          }),
+        );
+        const candidates = nextPatternDates(
+          parsed.data.startDate,
+          slotsWithPattern,
+          program.defaultMeetingQuota * 4,
+        );
+        const creates = [];
+        let sequence = existingOccurrences.length + 1;
+        for (const candidate of candidates) {
+          if (
+            existingOccurrences.length + creates.length >=
+            program.defaultMeetingQuota
+          )
+            break;
+          const key = `${candidate.slot.patternId}:${localDateKey(candidate.date)}:${candidate.slot.startTime}`;
+          if (existingKeys.has(key)) continue;
+          creates.push({
+            patternId: candidate.slot.patternId,
+            occurrenceDate: candidate.date,
+            occurrenceSequence: sequence++,
+            programId: program.id,
+            classId: kelas.id,
+            sessionType: "REGULAR",
+            dayOfWeek: candidate.date.getDay(),
+            startTime: combineDateTime(
+              localDateKey(candidate.date),
+              candidate.slot.startTime,
+            ),
+            endTime: combineDateTime(
+              localDateKey(candidate.date),
+              candidate.slot.endTime,
+            ),
+            startDate: candidate.date,
+            status: "ACTIVE",
+            isPattern: false,
+            mode: "OFFLINE",
+          });
+        }
+        if (creates.length)
+          await tx.schedule.createMany({ data: creates, skipDuplicates: true });
+        return {
+          patterns,
+          generated: creates.length,
+          target: program.defaultMeetingQuota,
+        };
       });
       res.json({ success: true, data: result });
     } catch (err) {
@@ -338,6 +507,7 @@ router.put(
 
 const meetingSchema = z
   .object({
+    programId: z.string().uuid("Program wajib dipilih"),
     sessionType: z.enum(["REGULAR", "PRIVATE"]),
     classId: z.string().uuid().optional(),
     studentId: z.string().uuid().optional(),
@@ -450,7 +620,9 @@ router.post(
           tx.subject.findFirst({
             where: { id: data.subjectId, isActive: true },
           }),
-          tx.program.findUnique({ where: { code: data.sessionType } }),
+          tx.program.findFirst({
+            where: { id: data.programId, isActive: true },
+          }),
         ]);
         if (!tutor)
           throw new AppError(
@@ -462,6 +634,16 @@ router.post(
           throw new AppError(
             "Mata pelajaran tidak ditemukan atau tidak aktif.",
             404,
+          );
+        if (!program)
+          throw new AppError("Program tidak ditemukan atau tidak aktif.", 404);
+        if (
+          (program.learningModel === "CLASS_BASED") !==
+          (data.sessionType === "REGULAR")
+        )
+          throw new AppError(
+            "Program tidak sesuai dengan jenis pertemuan.",
+            400,
           );
         if (
           data.sessionType === "REGULAR" &&
@@ -498,6 +680,38 @@ router.post(
           if (!pattern || occurrence.getDay() !== pattern.dayOfWeek)
             throw new AppError("Pola asal pertemuan tidak valid.", 422);
           patternOccurrenceDate = occurrence;
+        }
+        // An Admin completing a generated placeholder updates that occurrence;
+        // it must not create a second Schedule or an early TeachingSession.
+        if (data.sessionType === "REGULAR") {
+          const occurrence = await tx.schedule.findFirst({
+            where: {
+              programId: program.id,
+              classId: data.classId,
+              occurrenceDate: new Date(`${data.sessionDate}T00:00:00`),
+              startTime: combineDateTime(data.sessionDate, data.startTime),
+              endTime: combineDateTime(data.sessionDate, data.endTime),
+              isPattern: false,
+              status: "ACTIVE",
+            },
+          });
+          if (occurrence) {
+            if (occurrence.tutorId && occurrence.tutorId !== data.tutorId)
+              throw new AppError(
+                "Occurrence sudah ditugaskan ke tentor lain.",
+                409,
+              );
+            return tx.schedule.update({
+              where: { id: occurrence.id },
+              data: {
+                tutorId: data.tutorId,
+                subjectId: data.subjectId,
+                mode: data.mode,
+                location:
+                  data.mode === "OFFLINE" ? data.location || null : null,
+              },
+            });
+          }
         }
         return tx.teachingSession.create({
           data: {
@@ -541,6 +755,7 @@ router.post(
 
 const updateMeetingSchema = z
   .object({
+    programId: z.string().uuid("Program wajib dipilih"),
     tutorId: z.string().uuid(),
     subjectId: z.string().uuid(),
     sessionDate: dateString,
@@ -580,12 +795,13 @@ router.put(
         {
           ...data,
           sessionType: current.sessionType as "REGULAR" | "PRIVATE",
+          programId: data.programId,
           classId: current.classId || undefined,
           studentId: current.studentId || undefined,
         },
         current.id,
       );
-      const [tutor, subject] = await Promise.all([
+      const [tutor, subject, program] = await Promise.all([
         prisma.tutor.findFirst({
           where: {
             id: data.tutorId,
@@ -598,6 +814,9 @@ router.put(
         prisma.subject.findFirst({
           where: { id: data.subjectId, isActive: true },
         }),
+        prisma.program.findFirst({
+          where: { id: data.programId, isActive: true },
+        }),
       ]);
       if (!tutor)
         throw new AppError(
@@ -609,10 +828,18 @@ router.put(
           "Mata pelajaran tidak ditemukan atau tidak aktif.",
           404,
         );
+      if (!program)
+        throw new AppError("Program tidak ditemukan atau tidak aktif.", 404);
+      if (
+        (program.learningModel === "CLASS_BASED") !==
+        (current.sessionType === "REGULAR")
+      )
+        throw new AppError("Program tidak sesuai dengan jenis pertemuan.", 400);
       const result = await prisma.teachingSession.update({
         where: { id: current.id },
         data: {
           tutorId: data.tutorId,
+          programId: program.id,
           subjectId: data.subjectId,
           sessionDate: new Date(`${data.sessionDate}T00:00:00`),
           startTime: combineDateTime(data.sessionDate, data.startTime),
@@ -629,7 +856,11 @@ router.put(
         },
       });
 
-      const when = formatMeetingWhen(data.sessionDate, data.startTime, data.endTime);
+      const when = formatMeetingWhen(
+        data.sessionDate,
+        data.startTime,
+        data.endTime,
+      );
       if (data.tutorId !== current.tutorId) {
         // Reassigned to a different tentor — the old one needs to know it's
         // no longer theirs just as much as the new one needs to know it is.
@@ -698,10 +929,81 @@ router.delete(
           notifyTutorOfMeeting(
             tutor.userId,
             "Pertemuan Dihapus",
-            formatMeetingWhenFromRecord(meeting.sessionDate, meeting.startTime, meeting.endTime),
+            formatMeetingWhenFromRecord(
+              meeting.sessionDate,
+              meeting.startTime,
+              meeting.endTime,
+            ),
           );
       }
       res.json({ success: true, data: { id: meeting.id } });
+    } catch (err) {
+      handleError(err, res);
+    }
+  },
+);
+
+const completeOccurrenceSchema = z.object({
+  tutorId: z.string().uuid("Tentor wajib dipilih"),
+  subjectId: z.string().uuid("Mata pelajaran wajib dipilih"),
+  mode: z.enum(["ONLINE", "OFFLINE"]),
+  location: z.string().trim().max(255).optional(),
+});
+
+// Completes the planning data on one generated occurrence. It intentionally
+// never creates a TeachingSession or a second Schedule.
+router.put(
+  "/occurrences/:id/complete",
+  requireAuth,
+  requireRole("ADMIN"),
+  async (req: Request, res: Response) => {
+    const parsed = completeOccurrenceSchema.safeParse(req.body);
+    if (!parsed.success)
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
+    try {
+      const data = parsed.data;
+      const result = await prisma.$transaction(async (tx) => {
+        const occurrence = await tx.schedule.findFirst({
+          where: { id: req.params.id, isPattern: false, status: "ACTIVE" },
+        });
+        if (!occurrence)
+          throw new AppError("Occurrence pertemuan tidak ditemukan.", 404);
+        if (!occurrence.programId || !occurrence.classId)
+          throw new AppError(
+            "Program atau kelas pada pertemuan ini belum ditentukan.",
+            422,
+          );
+        const tutor = await tx.tutor.findFirst({
+          where: {
+            id: data.tutorId,
+            status: "ACTIVE",
+            deletedAt: null,
+            subjects: { some: { subjectId: data.subjectId } },
+          },
+        });
+        if (!tutor)
+          throw new AppError(
+            "Tentor tidak dapat mengajar mata pelajaran yang dipilih.",
+            422,
+          );
+        const subject = await tx.subject.findFirst({
+          where: { id: data.subjectId, isActive: true },
+        });
+        if (!subject) throw new AppError("Mata pelajaran tidak aktif.", 422);
+        return tx.schedule.update({
+          where: { id: occurrence.id },
+          data: {
+            tutorId: tutor.id,
+            subjectId: subject.id,
+            mode: data.mode,
+            location: data.mode === "OFFLINE" ? data.location || null : null,
+          },
+        });
+      });
+      res.json({ success: true, data: result });
     } catch (err) {
       handleError(err, res);
     }
@@ -761,14 +1063,15 @@ router.put("/:id", requireAuth, async (req: Request, res: Response) => {
   if (req.user!.role === "TENTOR") {
     return res.status(403).json({
       error: "Forbidden",
-      message: "Tentor tidak dapat mengubah jadwal langsung. Ajukan perubahan pada pertemuan terkait.",
+      message:
+        "Tentor tidak dapat mengubah jadwal langsung. Ajukan perubahan pada pertemuan terkait.",
     });
   } else if (req.user!.role !== "ADMIN") {
     return res.status(403).json({ error: "Forbidden" });
   }
 
   try {
-    const referenceDate = d.startDate ?? new Date().toISOString().split("T")[0];
+    const referenceDate = d.startDate ?? localDateKey(new Date());
     const data: Record<string, unknown> = {};
     if (d.notes !== undefined) data.notes = d.notes;
     if (d.mode !== undefined) data.mode = d.mode;

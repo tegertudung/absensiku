@@ -11,6 +11,7 @@ import {
   setTutorActive,
   deleteTutor,
   getOwnTutorProfile,
+  resetTutorPassword,
 } from "../services/tutorService";
 
 const router = Router();
@@ -134,6 +135,36 @@ const updateSchema = z.object({
     .min(1, "Pilih minimal satu mata pelajaran.")
     .optional(),
 });
+
+const resetPasswordSchema = z.object({
+  newPassword: z.string().min(6, "Password minimal 6 karakter"),
+});
+
+// PATCH /api/tutors/:id/password — admin recovery only; never returns a hash.
+router.patch(
+  "/:id/password",
+  requireAuth,
+  requireRole("ADMIN"),
+  async (req: Request, res: Response) => {
+    const parsed = resetPasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
+    }
+    try {
+      await resetTutorPassword(
+        req.params.id,
+        parsed.data.newPassword,
+        req.user!.userId,
+      );
+      res.json({ success: true, message: "Password tentor berhasil direset" });
+    } catch (err) {
+      handleError(err, res);
+    }
+  },
+);
 
 // PUT /api/tutors/:id
 router.put(

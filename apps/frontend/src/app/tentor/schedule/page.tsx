@@ -32,6 +32,8 @@ interface ScheduleItem {
   status: string;
   mode: string;
   location: string | null;
+  occurrenceDate?: string | null;
+  tutorId?: string | null;
   class: (Quota & { name: string }) | null;
   student: { name: string; packages?: Quota[] } | null;
   subject: { name: string } | null;
@@ -177,6 +179,8 @@ function buildAgenda(
   const weekday = date.getDay();
 
   const daySchedules = schedules.filter((s) => {
+    if (s.occurrenceDate)
+      return isoDate(new Date(s.occurrenceDate)) === dateKey && s.status === "ACTIVE";
     if (s.dayOfWeek !== weekday || s.status !== "ACTIVE") return false;
     if (isoDate(new Date(s.startDate)) > dateKey) return false;
     if (s.endDate && isoDate(new Date(s.endDate)) < dateKey) return false;
@@ -455,7 +459,12 @@ export default function TentorSchedulePage() {
       await api.post("/sessions", { scheduleId, sessionDate: dateKey });
       await load();
     } catch (err: any) {
-      setActionError(err.response?.data?.message || "Gagal memulai sesi.");
+      const message = err.response?.data?.message || "Gagal memulai sesi.";
+      if (message.includes("belum dilengkapi")) {
+        window.location.assign(`/tentor/sessions/direct?scheduleId=${scheduleId}&sessionDate=${dateKey}`);
+        return;
+      }
+      setActionError(message);
     } finally {
       setBusyId(null);
     }

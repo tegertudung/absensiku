@@ -15,7 +15,18 @@ type Subject = {
   description: string | null;
   isActive: boolean;
 };
-type Student = { id: string; name: string; status: string };
+type Student = {
+  id: string;
+  name: string;
+  status: string;
+  programEnrollments?: Array<{ programId: string; status: string }>;
+};
+type Program = {
+  id: string;
+  name: string;
+  learningModel: string;
+  isActive: boolean;
+};
 type Enrollment = {
   id: string;
   studentId: string;
@@ -29,11 +40,30 @@ type ClassItem = {
   quotaTotal: number;
   quotaRemaining: number;
   status: string;
-  _count: { enrollments: number };
+  _count: { studentPrograms: number };
 };
-type ClassDetail = ClassItem & { enrollments: Enrollment[] };
+type Occurrence = {
+  id: string;
+  occurrenceSequence: number | null;
+  occurrenceDate: string | null;
+  startTime: string;
+  endTime: string;
+  tutor: { name: string } | null;
+  subject: { name: string } | null;
+  sessions: Array<{ status: string }>;
+};
+type ClassDetail = ClassItem & {
+  enrollments: Enrollment[];
+  program: { id: string; name: string } | null;
+  occurrences: Occurrence[];
+};
 
-const emptyClassForm = { name: "", level: "", studentIds: [] as string[] };
+const emptyClassForm = {
+  name: "",
+  level: "",
+  programId: "",
+  studentIds: [] as string[],
+};
 
 function initials(name: string) {
   return name
@@ -44,11 +74,16 @@ function initials(name: string) {
     .join("")
     .toUpperCase();
 }
+function occurrenceTime(value: string) {
+  const date = new Date(value);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
 
 export default function AdminClassesPage() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [classes, setClasses] = useState<ClassItem[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
+  const [programs, setPrograms] = useState<Program[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [subjectModal, setSubjectModal] = useState(false);
@@ -72,14 +107,21 @@ export default function AdminClassesPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [subjectRes, classRes, studentRes] = await Promise.all([
+      const [subjectRes, classRes, studentRes, programRes] = await Promise.all([
         api.get("/subjects"),
         api.get("/classes"),
         api.get("/students"),
+        api.get("/programs"),
       ]);
       setSubjects(subjectRes.data.data);
       setClasses(classRes.data.data);
       setStudents(studentRes.data.data);
+      setPrograms(
+        programRes.data.data.filter(
+          (program: Program) =>
+            program.isActive && program.learningModel === "CLASS_BASED",
+        ),
+      );
     } catch {
       setLoadError("Gagal memuat data kelas dan mata pelajaran.");
     } finally {
@@ -96,10 +138,15 @@ export default function AdminClassesPage() {
   );
   const visibleStudents = useMemo(
     () =>
-      activeStudents.filter((student) =>
-        student.name.toLowerCase().includes(studentQuery.toLowerCase()),
+      activeStudents.filter(
+        (student) =>
+          student.programEnrollments?.some(
+            (enrollment) =>
+              enrollment.programId === classForm.programId &&
+              enrollment.status === "ACTIVE",
+          ) && student.name.toLowerCase().includes(studentQuery.toLowerCase()),
       ),
-    [activeStudents, studentQuery],
+    [activeStudents, classForm.programId, studentQuery],
   );
 
   function openNewClass() {
@@ -121,6 +168,7 @@ export default function AdminClassesPage() {
       setClassForm({
         name: data.name,
         level: data.level || "",
+        programId: "",
         studentIds: data.enrollments.map((enrollment) => enrollment.studentId),
       });
     } catch (error: any) {
@@ -163,6 +211,7 @@ export default function AdminClassesPage() {
         name: classForm.name.trim(),
         level: classForm.level.trim() || undefined,
         studentIds: classForm.studentIds,
+        programId: classForm.programId || undefined,
       };
       if (editingClassId) await api.put(`/classes/${editingClassId}`, payload);
       else await api.post("/classes", payload);
@@ -314,8 +363,8 @@ export default function AdminClassesPage() {
         </div>
       </SectionCard>
       <SectionCard
-        title="Kelas Reguler"
-        description="Kelas adalah kelompok belajar; kuota pertemuan melekat pada kelas."
+        title="Daftar Kelas"
+        description="Kelas adalah kelompok belajar akademik; kuota pertemuan melekat pada kelas."
       >
         {loading ? (
           <p className="py-6 text-center text-sm text-gray-400">
@@ -323,7 +372,7 @@ export default function AdminClassesPage() {
           </p>
         ) : classes.length === 0 ? (
           <EmptyState
-            title="Belum ada kelas reguler"
+            title="Belum ada kelas"
             message="Tambahkan kelas untuk mulai mengelola kelompok belajar."
           />
         ) : (
@@ -351,7 +400,7 @@ export default function AdminClassesPage() {
                       {item.level || "-"}
                     </td>
                     <td className="px-4 py-3 text-gray-600">
-                      {item._count.enrollments} siswa
+                      {item._count.studentPrograms} siswa
                     </td>
                     <td
                       className={`px-4 py-3 font-medium ${item.quotaRemaining === 0 ? "text-red-700" : item.quotaRemaining <= 3 ? "text-amber-700" : "text-gray-700"}`}
@@ -443,7 +492,7 @@ export default function AdminClassesPage() {
                   setClassForm({ ...classForm, name: event.target.value })
                 }
                 className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
-                placeholder="Contoh: Reguler A"
+                placeholder="Contoh: Kelas A"
               />
             </label>
             <label className="block text-sm font-medium text-gray-700">
@@ -458,6 +507,27 @@ export default function AdminClassesPage() {
                 placeholder="Contoh: SMP"
               />
             </label>
+            <label className="block text-sm font-medium text-gray-700">
+              Program untuk Penempatan Siswa *
+              <select
+                value={classForm.programId}
+                onChange={(event) =>
+                  setClassForm({
+                    ...classForm,
+                    programId: event.target.value,
+                    studentIds: [],
+                  })
+                }
+                className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              >
+                <option value="">Pilih Program</option>
+                {programs.map((program) => (
+                  <option key={program.id} value={program.id}>
+                    {program.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <div>
               <label className="block text-sm font-medium text-gray-700">
                 Siswa
@@ -469,7 +539,7 @@ export default function AdminClassesPage() {
                 placeholder="Cari dan pilih siswa"
               />
               <div className="mt-2 max-h-44 overflow-y-auto rounded-md border border-gray-200">
-                {visibleStudents.length ? (
+                {classForm.programId && visibleStudents.length ? (
                   visibleStudents.map((student) => (
                     <label
                       key={student.id}
@@ -486,7 +556,9 @@ export default function AdminClassesPage() {
                   ))
                 ) : (
                   <p className="px-3 py-4 text-sm text-gray-400">
-                    Belum ada siswa aktif yang dapat dipilih.
+                    {classForm.programId
+                      ? "Belum ada siswa aktif yang dapat dipilih."
+                      : "Pilih Program terlebih dahulu."}
                   </p>
                 )}
               </div>
@@ -548,9 +620,17 @@ export default function AdminClassesPage() {
                     <div className="rounded-lg border border-gray-200 p-3">
                       <p className="text-xs text-gray-500">Jumlah Siswa</p>
                       <p className="mt-1 text-lg font-semibold text-gray-900">
-                        {detail._count.enrollments}
+                        {detail._count.studentPrograms}
                       </p>
                     </div>
+                    {detail.program && (
+                      <p className="text-sm text-gray-600">
+                        Program:{" "}
+                        <span className="font-medium text-gray-900">
+                          {detail.program.name}
+                        </span>
+                      </p>
+                    )}
                     <div className="rounded-lg border border-gray-200 p-3">
                       <p className="text-xs text-gray-500">Sisa Pertemuan</p>
                       <p className="mt-1 text-lg font-semibold text-gray-900">
@@ -581,6 +661,77 @@ export default function AdminClassesPage() {
                     ) : (
                       <p className="text-sm text-gray-400">
                         Belum ada siswa terdaftar.
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Rencana Pertemuan
+                    </p>
+                    {detail.occurrences.length ? (
+                      <div className="max-h-64 overflow-auto rounded-lg border border-gray-200">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-gray-50 text-gray-500">
+                            <tr>
+                              <th className="px-3 py-2">#</th>
+                              <th>Tanggal</th>
+                              <th>Waktu</th>
+                              <th>Mapel</th>
+                              <th>Tentor</th>
+                              <th>Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {detail.occurrences.map((item, index) => {
+                              const state =
+                                item.sessions[0]?.status === "COMPLETED"
+                                  ? "Selesai"
+                                  : item.tutor && item.subject
+                                    ? "Siap"
+                                    : "Belum dilengkapi";
+                              return (
+                                <tr
+                                  key={item.id}
+                                  className="border-t border-gray-100"
+                                >
+                                  <td className="px-3 py-2">
+                                    {item.occurrenceSequence || index + 1}
+                                  </td>
+                                  <td>
+                                    {item.occurrenceDate
+                                      ? new Intl.DateTimeFormat("id-ID", {
+                                          day: "2-digit",
+                                          month: "short",
+                                          year: "numeric",
+                                        }).format(new Date(item.occurrenceDate))
+                                      : "-"}
+                                  </td>
+                                  <td>
+                                    {occurrenceTime(item.startTime)}–
+                                    {occurrenceTime(item.endTime)}
+                                  </td>
+                                  <td>{item.subject?.name || "-"}</td>
+                                  <td>{item.tutor?.name || "-"}</td>
+                                  <td
+                                    className={
+                                      state === "Belum dilengkapi"
+                                        ? "text-orange-700"
+                                        : state === "Siap"
+                                          ? "text-emerald-700"
+                                          : "text-navy-900"
+                                    }
+                                  >
+                                    {state}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-400">
+                        Belum ada rencana pertemuan.
                       </p>
                     )}
                   </div>

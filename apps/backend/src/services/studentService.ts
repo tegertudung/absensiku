@@ -1,6 +1,38 @@
 import { prisma } from "../utils/prisma";
 import { AppError } from "../utils/errors";
 import { logAudit } from "../utils/auditLog";
+import { nextBusinessCode } from "../utils/businessCode";
+
+function normalizeStudentName(name: string) {
+  return name.trim();
+}
+
+function normalizeStudentPhone(phone: string | undefined) {
+  return phone?.replace(/\D/g, "") || "";
+}
+
+async function assertStudentIdentityAvailable(
+  tx: Pick<typeof prisma, "student">,
+  name: string,
+  phone: string | undefined,
+  excludeStudentId?: string,
+) {
+  const normalizedPhone = normalizeStudentPhone(phone);
+  if (!normalizedPhone) return;
+  const duplicate = await tx.student.findFirst({
+    where: {
+      name: { equals: normalizeStudentName(name), mode: "insensitive" },
+      phone: normalizedPhone,
+      ...(excludeStudentId ? { id: { not: excludeStudentId } } : {}),
+    },
+    select: { id: true },
+  });
+  if (duplicate)
+    throw new AppError(
+      "Data siswa dengan nama dan nomor telepon tersebut sudah terdaftar.",
+      409,
+    );
+}
 
 export async function createStudent(data: {
   name: string;
@@ -11,13 +43,92 @@ export async function createStudent(data: {
   nis?: string;
   school?: string;
   schoolClass?: string;
+  programEnrollments?: Array<{ programId: string; classId?: string | null }>;
 }) {
-  return prisma.student.create({ data: { ...data, status: "ACTIVE" } });
+  return prisma.$transaction(async (tx) => {
+    await assertStudentIdentityAvailable(tx, data.name, data.phone);
+    const enrollments = data.programEnrollments ?? [];
+    const programIds = [...new Set(enrollments.map((item) => item.programId))];
+    if (programIds.length !== enrollments.length)
+      throw new AppError("Program tidak boleh dipilih lebih dari sekali.", 400);
+    const programs = await tx.program.findMany({
+      where: { id: { in: programIds }, isActive: true },
+    });
+    if (programs.length !== programIds.length)
+      throw new AppError(
+        "Satu atau lebih program tidak ditemukan atau tidak aktif.",
+        400,
+      );
+    for (const item of enrollments) {
+      const program = programs.find((value) => value.id === item.programId)!;
+      if (program.learningModel === "CLASS_BASED" && !item.classId)
+        throw new AppError("Pilih kelas untuk program berbasis kelas.", 400);
+      if (program.learningModel === "CLASS_BASED" && item.classId) {
+        const kelas = await tx.class.findFirst({
+          where: { id: item.classId, status: "ACTIVE" },
+        });
+        if (!kelas)
+          throw new AppError("Kelas tidak ditemukan atau tidak aktif.", 400);
+      }
+      if (program.learningModel !== "CLASS_BASED" && item.classId)
+        throw new AppError("Program individual tidak menggunakan kelas.", 400);
+    }
+    const { programEnrollments: _programEnrollments, ...profile } = data;
+    const student = await tx.student.create({
+      data: {
+        ...profile,
+        studentCode: await nextBusinessCode(tx, "student"),
+        status: "ACTIVE",
+      },
+    });
+    const enrolledClassIds = new Set<string>();
+    for (const item of enrollments) {
+      const program = programs.find((value) => value.id === item.programId)!;
+      await tx.studentProgram.create({
+        data: {
+          studentId: student.id,
+          programId: item.programId,
+          classId: item.classId || null,
+        },
+      });
+      if (item.classId && !enrolledClassIds.has(item.classId)) {
+        await tx.classEnrollment.create({
+          data: {
+            studentId: student.id,
+            classId: item.classId,
+            status: "ACTIVE",
+          },
+        });
+        enrolledClassIds.add(item.classId);
+      }
+      if (program.learningModel === "INDIVIDUAL") {
+        await tx.privatePackage.create({
+          data: {
+            studentId: student.id,
+            programId: program.id,
+            quotaTotal: program.defaultMeetingQuota,
+            quotaRemaining: program.defaultMeetingQuota,
+            status: "ACTIVE",
+          },
+        });
+      }
+    }
+    return tx.student.findUniqueOrThrow({
+      where: { id: student.id },
+      include: {
+        programEnrollments: { include: { program: true, class: true } },
+      },
+    });
+  });
 }
 
 export async function listStudents() {
   const students = await prisma.student.findMany({
     include: {
+      programEnrollments: {
+        where: { status: "ACTIVE" },
+        include: { program: true, class: true },
+      },
       enrollments: {
         where: { status: "ACTIVE" },
         include: {
@@ -57,30 +168,33 @@ export async function listStudents() {
     orderBy: { name: "asc" },
   });
 
-  return students.map(({ enrollments, packages, _count, ...student }) => ({
-    ...student,
-    hasOperationalHistory:
-      _count.enrollments > 0 ||
-      _count.packages > 0 ||
-      _count.schedules > 0 ||
-      _count.sessions > 0,
-    programs: [
-      ...enrollments.map((enrollment) => ({
-        type: "REGULAR" as const,
-        label: enrollment.class.name,
-        quotaTotal: enrollment.class.quotaTotal,
-        quotaUsed: enrollment.class.quotaUsed,
-        quotaRemaining: enrollment.class.quotaRemaining,
-      })),
-      ...packages.map((pkg) => ({
-        type: "PRIVATE" as const,
-        label: pkg.packageName || "Paket Privat",
-        quotaTotal: pkg.quotaTotal,
-        quotaUsed: pkg.quotaUsed,
-        quotaRemaining: pkg.quotaRemaining,
-      })),
-    ],
-  }));
+  return students.map(
+    ({ enrollments, packages, programEnrollments, _count, ...student }) => ({
+      ...student,
+      programEnrollments,
+      hasOperationalHistory:
+        _count.enrollments > 0 ||
+        _count.packages > 0 ||
+        _count.schedules > 0 ||
+        _count.sessions > 0,
+      programs: [
+        ...enrollments.map((enrollment) => ({
+          type: "REGULAR" as const,
+          label: enrollment.class.name,
+          quotaTotal: enrollment.class.quotaTotal,
+          quotaUsed: enrollment.class.quotaUsed,
+          quotaRemaining: enrollment.class.quotaRemaining,
+        })),
+        ...packages.map((pkg) => ({
+          type: "PRIVATE" as const,
+          label: pkg.packageName || "Paket Privat",
+          quotaTotal: pkg.quotaTotal,
+          quotaUsed: pkg.quotaUsed,
+          quotaRemaining: pkg.quotaRemaining,
+        })),
+      ],
+    }),
+  );
 }
 
 /**
@@ -164,6 +278,10 @@ export async function getStudentById(id: string) {
     where: { id },
     include: {
       packages: { orderBy: { activationDate: "desc" } },
+      programEnrollments: {
+        include: { program: true, class: true },
+        orderBy: { createdAt: "asc" },
+      },
       enrollments: {
         where: { status: "ACTIVE" },
         include: {
@@ -182,7 +300,90 @@ export async function getStudentById(id: string) {
     },
   });
   if (!student) throw new AppError("Siswa tidak ditemukan", 404);
-  return student;
+
+  const activeProgramEnrollments = student.programEnrollments.filter(
+    (enrollment) => enrollment.status === "ACTIVE",
+  );
+  const programIds = activeProgramEnrollments.map(
+    (enrollment) => enrollment.programId,
+  );
+  const classIds = activeProgramEnrollments
+    .map((enrollment) => enrollment.classId)
+    .filter((classId): classId is string => Boolean(classId));
+  const sessions = await prisma.teachingSession.findMany({
+    where: {
+      status: "COMPLETED",
+      programId: { in: programIds },
+      OR: [
+        { studentId: id },
+        { attendanceRecords: { some: { studentId: id } } },
+        ...(classIds.length ? [{ classId: { in: classIds } }] : []),
+      ],
+    },
+    include: {
+      program: { select: { id: true, name: true } },
+      class: { select: { id: true, name: true } },
+      tutor: { select: { name: true } },
+      subject: { select: { name: true } },
+    },
+    orderBy: { sessionDate: "desc" },
+  });
+  const programSummaries = await Promise.all(
+    activeProgramEnrollments.map(async (enrollment) => {
+      const packageForProgram = student.packages.find(
+        (pkg) =>
+          pkg.programId === enrollment.programId && pkg.status === "ACTIVE",
+      );
+      const completedSessions =
+        enrollment.program.learningModel === "CLASS_BASED"
+          ? enrollment.classId
+            ? await prisma.teachingSession.count({
+                where: {
+                  status: "COMPLETED",
+                  programId: enrollment.programId,
+                  classId: enrollment.classId,
+                },
+              })
+            : 0
+          : sessions.filter(
+              (session) =>
+                session.programId === enrollment.programId &&
+                session.studentId === id,
+            ).length;
+      const quota =
+        enrollment.program.learningModel === "CLASS_BASED" && enrollment.class
+          ? {
+              quotaTotal: enrollment.program.defaultMeetingQuota,
+              quotaRemaining: Math.max(
+                0,
+                enrollment.program.defaultMeetingQuota - completedSessions,
+              ),
+            }
+          : packageForProgram
+            ? {
+                quotaTotal: packageForProgram.quotaTotal,
+                quotaRemaining: packageForProgram.quotaRemaining,
+              }
+            : {
+                quotaTotal: enrollment.program.defaultMeetingQuota,
+                quotaRemaining: Math.max(
+                  0,
+                  enrollment.program.defaultMeetingQuota - completedSessions,
+                ),
+              };
+      return { ...enrollment, quota };
+    }),
+  );
+  const sessionHistory = sessions.filter((session) =>
+    activeProgramEnrollments.some(
+      (enrollment) =>
+        session.programId === enrollment.programId &&
+        (enrollment.program.learningModel === "CLASS_BASED"
+          ? session.classId === enrollment.classId
+          : session.studentId === id),
+    ),
+  );
+  return { ...student, programSummaries, sessionHistory };
 }
 
 export async function updateStudent(
@@ -197,11 +398,69 @@ export async function updateStudent(
     school: string;
     schoolClass: string;
     classId: string | null;
+    programEnrollments: Array<{ programId: string; classId?: string | null }>;
   }>,
 ) {
   const student = await prisma.student.findUnique({ where: { id } });
   if (!student) throw new AppError("Siswa tidak ditemukan", 404);
   return prisma.$transaction(async (tx) => {
+    await assertStudentIdentityAvailable(
+      tx,
+      data.name ?? student.name,
+      data.phone ?? student.phone ?? undefined,
+      id,
+    );
+    if (data.programEnrollments !== undefined) {
+      const requested = data.programEnrollments;
+      const ids = [...new Set(requested.map((item) => item.programId))];
+      if (ids.length !== requested.length)
+        throw new AppError(
+          "Program tidak boleh dipilih lebih dari sekali.",
+          400,
+        );
+      const programs = await tx.program.findMany({
+        where: { id: { in: ids } },
+      });
+      if (programs.length !== ids.length)
+        throw new AppError("Program tidak ditemukan.", 404);
+      for (const item of requested) {
+        const existing = await tx.studentProgram.findUnique({
+          where: {
+            studentId_programId: { studentId: id, programId: item.programId },
+          },
+        });
+        const program = programs.find((value) => value.id === item.programId)!;
+        if (!program.isActive && !existing)
+          throw new AppError(
+            "Program tidak aktif tidak dapat ditambahkan.",
+            400,
+          );
+        if (program.learningModel === "CLASS_BASED" && !item.classId)
+          throw new AppError("Pilih kelas untuk program berbasis kelas.", 400);
+        if (program.learningModel === "CLASS_BASED" && item.classId) {
+          const kelas = await tx.class.findFirst({
+            where: { id: item.classId, status: "ACTIVE" },
+          });
+          if (!kelas)
+            throw new AppError("Kelas tidak ditemukan atau tidak aktif.", 400);
+        }
+        await tx.studentProgram.upsert({
+          where: {
+            studentId_programId: { studentId: id, programId: item.programId },
+          },
+          create: {
+            studentId: id,
+            programId: item.programId,
+            classId: item.classId || null,
+          },
+          update: { status: "ACTIVE", classId: item.classId || null },
+        });
+      }
+      await tx.studentProgram.updateMany({
+        where: { studentId: id, programId: { notIn: ids }, status: "ACTIVE" },
+        data: { status: "INACTIVE" },
+      });
+    }
     if (data.classId !== undefined) {
       if (data.classId) {
         const kelas = await tx.class.findFirst({
@@ -231,7 +490,11 @@ export async function updateStudent(
           });
       }
     }
-    const { classId: _classId, ...profile } = data;
+    const {
+      classId: _classId,
+      programEnrollments: _programEnrollments,
+      ...profile
+    } = data;
     return tx.student.update({ where: { id }, data: profile });
   });
 }

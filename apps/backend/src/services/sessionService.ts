@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/prisma";
 import { getApplicableHonorRate } from "./honorService";
+import { formatBusinessDate, isAfterBusinessDate } from "../utils/businessDate";
 import { logAudit } from "../utils/auditLog";
 import { getProgramForSessionType } from "./programService";
 import { getSettings } from "./settingsService";
@@ -89,14 +90,23 @@ export async function createSessionFromSchedule(params: {
       "Pola kelas belum dilengkapi sebagai pertemuan aktual.",
       400,
     );
+  if (!schedule.programId)
+    throw new SessionError(
+      "Program pada jadwal ini belum ditentukan. Minta Admin memperbarui jadwal.",
+      422,
+    );
+  const assignedTutorId = schedule.tutorId;
 
   assertOwnership(params.actingTutorId, schedule.tutorId);
 
   const existing = await prisma.teachingSession.findFirst({
-    where: { scheduleId: schedule.id, sessionDate: params.sessionDate },
+    where: { scheduleId: schedule.id },
   });
-  if (existing)
-    throw new SessionError("Sesi untuk jadwal dan tanggal ini sudah ada", 409);
+  if (existing) {
+    if (existing.status === "COMPLETED")
+      throw new SessionError("Pertemuan ini sudah selesai.", 409);
+    return existing;
+  }
 
   if (schedule.sessionType === "PRIVATE") {
     if (!schedule.studentId)
@@ -131,21 +141,32 @@ export async function createSessionFromSchedule(params: {
     }
   }
 
-  return prisma.teachingSession.create({
-    data: {
-      scheduleId: schedule.id,
-      tutorId: schedule.tutorId,
-      sessionType: schedule.sessionType,
-      sessionDate: params.sessionDate,
-      classId: schedule.classId,
-      studentId: schedule.studentId,
-      subjectId: schedule.subjectId,
-      programId:
-        schedule.programId ??
-        (await getProgramForSessionType(schedule.sessionType))?.id,
-      status: "IN_PROGRESS",
-      createdBy: params.createdBy,
-    },
+  // PostgreSQL advisory lock makes the find/create pair idempotent for one
+  // occurrence without requiring a schema migration on an already-live DB.
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${schedule.id}))`;
+    const concurrent = await tx.teachingSession.findFirst({
+      where: { scheduleId: schedule.id },
+    });
+    if (concurrent) {
+      if (concurrent.status === "COMPLETED")
+        throw new SessionError("Pertemuan ini sudah selesai.", 409);
+      return concurrent;
+    }
+    return tx.teachingSession.create({
+      data: {
+        scheduleId: schedule.id,
+        tutorId: assignedTutorId,
+        sessionType: schedule.sessionType,
+        sessionDate: params.sessionDate,
+        classId: schedule.classId,
+        studentId: schedule.studentId,
+        subjectId: schedule.subjectId,
+        programId: schedule.programId,
+        status: "IN_PROGRESS",
+        createdBy: params.createdBy,
+      },
+    });
   });
 }
 
@@ -228,17 +249,18 @@ async function finalizeTeachingSession(
     );
   }
 
+  if (!session.programId)
+    throw new SessionError("Sesi tidak memiliki Program.", 422);
   const rate = await getApplicableHonorRate(
-    session.sessionType as "REGULAR" | "PRIVATE",
+    session.programId,
     session.sessionDate,
     tx,
-    session.programId,
   );
   if (!rate) {
     throw new SessionError(
-      `Tidak ada tarif honor aktif untuk sesi ${session.sessionType} pada tanggal ${
-        session.sessionDate.toISOString().split("T")[0]
-      }. Hubungi admin untuk mengatur master tarif.`,
+      `Tidak ada tarif honor aktif untuk sesi ${session.sessionType} pada tanggal ${formatBusinessDate(
+        session.sessionDate,
+      )}. Hubungi admin untuk mengatur master tarif.`,
       422,
     );
   }
@@ -391,7 +413,8 @@ export async function createDirectSession(params: {
   sessionDate: Date;
   startTime: string;
   endTime: string;
-  sessionType: "REGULAR" | "PRIVATE";
+  programId: string;
+  sessionType?: "REGULAR" | "PRIVATE";
   classId?: string;
   studentId?: string;
   studentIds?: string[];
@@ -401,10 +424,9 @@ export async function createDirectSession(params: {
   material: string;
   progressNotes?: string;
   score?: number | null;
+  scheduleId?: string;
 }) {
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  if (params.sessionDate > today)
+  if (isAfterBusinessDate(params.sessionDate, new Date()))
     throw new SessionError(
       "Sesi mengajar tidak dapat dicatat untuk tanggal mendatang.",
       422,
@@ -423,6 +445,13 @@ export async function createDirectSession(params: {
   const lowQuotaThreshold =
     Number((await getSettings()).lowQuotaWarningThreshold) || 3;
   const { completed, notifyInfo } = await prisma.$transaction(async (tx) => {
+    const program = await tx.program.findFirst({
+      where: { id: params.programId, isActive: true },
+    });
+    if (!program)
+      throw new SessionError("Program tidak ditemukan atau tidak aktif.", 404);
+    const sessionType =
+      program.learningModel === "CLASS_BASED" ? "REGULAR" : "PRIVATE";
     const subject = await tx.subject.findFirst({
       where: { id: params.subjectId, isActive: true },
     });
@@ -436,7 +465,8 @@ export async function createDirectSession(params: {
     let studentId: string | undefined;
     let programId: string | null | undefined;
     let privateStudentIds: string[] = [];
-    if (params.sessionType === "REGULAR") {
+    let occurrenceId: string | undefined;
+    if (sessionType === "REGULAR") {
       if (!params.classId)
         throw new SessionError("Kelas wajib dipilih untuk sesi reguler.", 422);
       const kelas = await tx.class.findFirst({
@@ -444,8 +474,113 @@ export async function createDirectSession(params: {
       });
       if (!kelas)
         throw new SessionError("Kelas tidak ditemukan atau tidak aktif.", 404);
+      const rosterCount = await tx.studentProgram.count({
+        where: { classId: kelas.id, programId: program.id, status: "ACTIVE" },
+      });
+      if (!rosterCount)
+        throw new SessionError(
+          "Kelas belum memiliki siswa pada Program yang dipilih.",
+          422,
+        );
       classId = kelas.id;
-      programId = kelas.programId;
+      // Prefer the planned occurrence. A conditional claim prevents two
+      // tentors from silently taking the same incomplete meeting.
+      const occurrence = await tx.schedule.findFirst({
+        where: params.scheduleId
+          ? { id: params.scheduleId, isPattern: false, sessionType: "REGULAR" }
+          : {
+              programId: program.id,
+              classId,
+              occurrenceDate: params.sessionDate,
+              startTime: start,
+              endTime: end,
+              isPattern: false,
+              status: "ACTIVE",
+            },
+      });
+      if (occurrence) {
+        if (
+          occurrence.programId !== program.id ||
+          occurrence.classId !== classId
+        )
+          throw new SessionError(
+            "Occurrence tidak sesuai dengan Program atau Kelas yang dipilih.",
+            422,
+          );
+        if (occurrence.tutorId && occurrence.tutorId !== params.tutorId)
+          throw new SessionError(
+            "Pertemuan ini sudah dilengkapi oleh tentor lain.",
+            409,
+          );
+        const existingSession = await tx.teachingSession.findFirst({
+          where: { scheduleId: occurrence.id },
+        });
+        if (existingSession) {
+          if (existingSession.status === "COMPLETED")
+            throw new SessionError("Pertemuan ini sudah selesai.", 409);
+          return finalizeTeachingSession(
+            tx,
+            existingSession.id,
+            params.userId,
+            params.tutorId,
+            {
+              material: params.material,
+              progressNotes: params.progressNotes,
+              score: params.score,
+            },
+            false,
+          );
+        }
+        if (!occurrence.tutorId) {
+          const claimed = await tx.schedule.updateMany({
+            where: { id: occurrence.id, tutorId: null },
+            data: {
+              tutorId: params.tutorId,
+              subjectId: subject.id,
+              mode: params.mode,
+              location:
+                params.mode === "OFFLINE"
+                  ? params.location?.trim() || null
+                  : null,
+            },
+          });
+          if (!claimed.count)
+            throw new SessionError(
+              "Pertemuan ini sudah dilengkapi oleh tentor lain.",
+              409,
+            );
+        } else if (!occurrence.subjectId) {
+          await tx.schedule.update({
+            where: { id: occurrence.id },
+            data: { subjectId: subject.id },
+          });
+        }
+        occurrenceId = occurrence.id;
+      } else {
+        // Existing business flow permits a direct regular meeting. It is still
+        // an occurrence and is checked again in the transaction above.
+        const created = await tx.schedule.create({
+          data: {
+            tutorId: params.tutorId,
+            subjectId: subject.id,
+            programId: program.id,
+            classId,
+            sessionType: "REGULAR",
+            dayOfWeek: params.sessionDate.getDay(),
+            startTime: start,
+            endTime: end,
+            startDate: params.sessionDate,
+            occurrenceDate: params.sessionDate,
+            status: "ACTIVE",
+            mode: params.mode,
+            location:
+              params.mode === "OFFLINE"
+                ? params.location?.trim() || null
+                : null,
+          },
+        });
+        occurrenceId = created.id;
+      }
     } else {
       privateStudentIds =
         params.studentIds ?? (params.studentId ? [params.studentId] : []);
@@ -467,6 +602,7 @@ export async function createDirectSession(params: {
       const activePackages = await tx.privatePackage.findMany({
         where: {
           studentId: { in: privateStudentIds },
+          programId: program.id,
           status: "ACTIVE",
         },
         orderBy: { activationDate: "asc" },
@@ -492,14 +628,13 @@ export async function createDirectSession(params: {
         privateStudentIds.map(async (id) => {
           const pkg = packageByStudentId.get(id)!;
           const rate = await getApplicableHonorRate(
-            "PRIVATE",
+            program.id,
             params.sessionDate,
             tx,
-            pkg.programId,
           );
           if (!rate)
             throw new SessionError(
-              "Tidak ada tarif honor aktif untuk sesi PRIVATE. Hubungi admin untuk mengatur master tarif.",
+              `Tidak ada tarif honor aktif untuk Program ${program.name}. Hubungi admin untuk mengatur master tarif.`,
               422,
             );
           return rate;
@@ -514,14 +649,12 @@ export async function createDirectSession(params: {
       studentId = privateStudentIds[0];
       programId = packageByStudentId.get(studentId)!.programId;
     }
-    if (!programId)
-      programId = (
-        await tx.program.findUnique({ where: { code: params.sessionType } })
-      )?.id;
+    programId = program.id;
     const session = await tx.teachingSession.create({
       data: {
+        scheduleId: occurrenceId,
         tutorId: params.tutorId,
-        sessionType: params.sessionType,
+        sessionType,
         sessionDate: params.sessionDate,
         startTime: start,
         endTime: end,
@@ -536,7 +669,7 @@ export async function createDirectSession(params: {
           params.mode === "OFFLINE" ? params.location?.trim() || null : null,
       },
     });
-    if (params.sessionType === "PRIVATE") {
+    if (sessionType === "PRIVATE") {
       await tx.attendanceRecord.createMany({
         data: privateStudentIds.map((participantId) => ({
           sessionId: session.id,

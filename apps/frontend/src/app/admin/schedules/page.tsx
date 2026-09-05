@@ -20,9 +20,12 @@ type Pattern = {
   startTime: string;
   endTime: string;
   class: { name: string } | null;
+  programId: string | null;
+  program?: { name: string; defaultMeetingQuota: number } | null;
 };
 type Meeting = {
   id: string;
+  programId: string | null;
   sessionType: string;
   classId: string | null;
   studentId: string | null;
@@ -59,13 +62,21 @@ type Legacy = {
   class: { name: string } | null;
   student: { name: string } | null;
   tutor: { name: string } | null;
+  tutorId: string | null;
   subject: { name: string } | null;
+  subjectId: string | null;
   mode: string;
   location: string | null;
   isPattern: boolean;
+  status: string;
+  occurrenceDate?: string | null;
+  programId?: string | null;
+  patternId?: string | null;
 };
 type CalendarItem = {
   id: string;
+  eventKind: "occurrence" | "pattern-preview" | "teaching-session";
+  scheduleId?: string;
   date: Date;
   start: string;
   end: string;
@@ -78,6 +89,7 @@ type CalendarItem = {
   mode?: string;
   location?: string | null;
   classId?: string;
+  programId?: string;
   patternId?: string;
   patternOccurrenceDate?: string;
   incomplete?: boolean;
@@ -132,12 +144,17 @@ export default function AdminSchedulesPage() {
   const [classes, setClasses] = useState<Option[]>([]);
   const [students, setStudents] = useState<Option[]>([]);
   const [subjects, setSubjects] = useState<Option[]>([]);
+  const [programs, setPrograms] = useState<
+    Array<Option & { learningModel: string; defaultMeetingQuota?: number }>
+  >([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [mutationError, setMutationError] = useState("");
   const [patternOpen, setPatternOpen] = useState(false);
   const [meetingOpen, setMeetingOpen] = useState(false);
   const [editing, setEditing] = useState<CalendarItem | null>(null);
+  const [completingOccurrence, setCompletingOccurrence] =
+    useState<CalendarItem | null>(null);
   const [selected, setSelected] = useState<CalendarItem | null>(null);
   const [dayDate, setDayDate] = useState<Date | null>(null);
   const [cancelItem, setCancelItem] = useState<CalendarItem | null>(null);
@@ -150,11 +167,16 @@ export default function AdminSchedulesPage() {
   const [tutorQuery, setTutorQuery] = useState("");
   const [filter, setFilter] = useState({ program: "", tutor: "", status: "" });
   const [patternClassId, setPatternClassId] = useState("");
+  const [patternProgramId, setPatternProgramId] = useState("");
+  const [patternStartDate, setPatternStartDate] = useState(() =>
+    iso(new Date()),
+  );
   const [slots, setSlots] = useState([
     { dayOfWeek: "2", startTime: "16:00", endTime: "17:30" },
   ]);
   const freshMeeting = () => ({
     sessionType: "REGULAR",
+    programId: "",
     classId: "",
     studentId: "",
     tutorId: "",
@@ -182,6 +204,7 @@ export default function AdminSchedulesPage() {
         classRes,
         studentRes,
         subjectRes,
+        programRes,
       ] = await Promise.all([
         api.get("/schedules/patterns"),
         api.get(`/sessions?startDate=${iso(week)}&endDate=${iso(weekEnd)}`),
@@ -190,6 +213,7 @@ export default function AdminSchedulesPage() {
         api.get("/classes"),
         api.get("/students"),
         api.get("/subjects"),
+        api.get("/programs?active=true"),
       ]);
       setPatterns(patternRes.data.data);
       setMeetings(meetingRes.data.data);
@@ -204,6 +228,7 @@ export default function AdminSchedulesPage() {
       setSubjects(
         subjectRes.data.data.filter((row: Option) => row.isActive !== false),
       );
+      setPrograms(programRes.data.data);
     } catch {
       setLoadError("Gagal memuat kalender jadwal.");
     } finally {
@@ -234,6 +259,8 @@ export default function AdminSchedulesPage() {
       .filter((meeting) => meeting.startTime && meeting.endTime)
       .map((meeting) => ({
         id: meeting.id,
+        eventKind: "teaching-session" as const,
+        scheduleId: meeting.scheduleId || undefined,
         date: new Date(`${meeting.sessionDate.slice(0, 10)}T00:00:00`),
         start: time(meeting.startTime),
         end: time(meeting.endTime),
@@ -264,31 +291,60 @@ export default function AdminSchedulesPage() {
     const legacyItems: CalendarItem[] = legacy
       .filter(
         (row) =>
+          Boolean(row.occurrenceDate) ||
           row.sessionType !== "REGULAR" ||
           !patterns.some((pattern) => pattern.classId === row.classId),
       )
-      .flatMap(
-        (row) =>
-          Array.from({ length: 7 }, (_, offset) => {
-            const date = addDays(week, offset);
-            if (date.getDay() !== row.dayOfWeek) return null;
-            return {
-              id: `${row.id}-${iso(date)}`,
+      .flatMap((row) => {
+        if (row.occurrenceDate) {
+          const date = new Date(`${row.occurrenceDate.slice(0, 10)}T00:00:00`);
+          if (date < week || date > weekEnd) return [];
+          return [
+            {
+              id: row.id,
+              eventKind: "occurrence" as const,
+              scheduleId: row.id,
               date,
               start: time(row.startTime),
               end: time(row.endTime),
               sessionType: row.sessionType as "REGULAR" | "PRIVATE",
               label: row.class?.name || row.student?.name || "-",
               tutor: row.tutor?.name,
+              tutorId: row.tutorId || undefined,
               subject: row.subject?.name,
-              status: "SCHEDULED",
+              status: row.status,
               mode: row.mode,
               location: row.location,
               classId: row.classId || undefined,
-              calendarState: "WAITING_NOTE",
-            };
-          }).filter(Boolean) as CalendarItem[],
-      );
+              programId: row.programId || undefined,
+              patternId: row.patternId || undefined,
+              incomplete: !row.tutor || !row.subject,
+              calendarState:
+                !row.tutor || !row.subject ? "INCOMPLETE" : "WAITING_NOTE",
+            },
+          ];
+        }
+        return Array.from({ length: 7 }, (_, offset) => {
+          const date = addDays(week, offset);
+          if (date.getDay() !== row.dayOfWeek) return null;
+          return {
+            id: `${row.id}-${iso(date)}`,
+            eventKind: "pattern-preview" as const,
+            date,
+            start: time(row.startTime),
+            end: time(row.endTime),
+            sessionType: row.sessionType as "REGULAR" | "PRIVATE",
+            label: row.class?.name || row.student?.name || "-",
+            tutor: row.tutor?.name,
+            subject: row.subject?.name,
+            status: "SCHEDULED",
+            mode: row.mode,
+            location: row.location,
+            classId: row.classId || undefined,
+            calendarState: "WAITING_NOTE",
+          };
+        }).filter(Boolean) as CalendarItem[];
+      });
     const compatibleLegacy = legacyItems.filter(
       (item) =>
         item.sessionType !== "REGULAR" ||
@@ -312,11 +368,18 @@ export default function AdminSchedulesPage() {
                 time(pattern.startTime),
                 time(pattern.endTime),
               ),
+            ) ||
+            legacy.some(
+              (row) =>
+                row.patternId === pattern.id &&
+                row.occurrenceDate?.slice(0, 10) === iso(date) &&
+                time(row.startTime) === time(pattern.startTime),
             )
           )
             return null;
           return {
             id: `pattern-${pattern.id}-${iso(date)}`,
+            eventKind: "pattern-preview" as const,
             date,
             start: time(pattern.startTime),
             end: time(pattern.endTime),
@@ -345,19 +408,47 @@ export default function AdminSchedulesPage() {
     setMutationError("");
     setStudentQuery("");
     setTutorQuery("");
+    if (prefill?.eventKind === "pattern-preview") {
+      setMutationError(
+        "Preview pola bukan pertemuan nyata dan tidak dapat dilengkapi.",
+      );
+      return;
+    }
+    const rawOccurrence =
+      prefill?.eventKind === "occurrence"
+        ? legacy.find((row) => row.id === prefill.scheduleId)
+        : undefined;
+    if (prefill?.incomplete && !rawOccurrence) {
+      setMutationError(
+        "Data occurrence tidak ditemukan. Muat ulang kalender lalu coba lagi.",
+      );
+      return;
+    }
+    setCompletingOccurrence(rawOccurrence ? prefill! : null);
     setForm(
-      prefill
+      rawOccurrence
         ? {
             ...freshMeeting(),
             sessionType: "REGULAR",
-            classId: prefill.classId || "",
-            patternId: prefill.patternId || "",
-            patternOccurrenceDate: prefill.patternOccurrenceDate || "",
-            sessionDate: iso(prefill.date),
-            startTime: prefill.start,
-            endTime: prefill.end,
+            classId: rawOccurrence.classId || "",
+            programId: rawOccurrence.programId || "",
+            subjectId: rawOccurrence.subjectId || "",
+            tutorId: rawOccurrence.tutorId || "",
+            patternId: rawOccurrence.patternId || "",
+            sessionDate: rawOccurrence.occurrenceDate?.slice(0, 10) || "",
+            startTime: time(rawOccurrence.startTime),
+            endTime: time(rawOccurrence.endTime),
+            mode: rawOccurrence.mode || "OFFLINE",
+            location: rawOccurrence.location || "",
           }
-        : freshMeeting(),
+        : prefill
+          ? {
+              ...freshMeeting(),
+              sessionDate: iso(prefill.date),
+              startTime: prefill.start,
+              endTime: prefill.end,
+            }
+          : freshMeeting(),
     );
     setMeetingOpen(true);
   }
@@ -365,11 +456,13 @@ export default function AdminSchedulesPage() {
     if (!item.meeting) return;
     setMutationError("");
     setEditing(item);
+    setCompletingOccurrence(null);
     setStudentQuery("");
     setTutorQuery("");
     setForm({
       ...freshMeeting(),
       sessionType: item.sessionType,
+      programId: item.meeting.programId || "",
       classId: item.meeting.classId || "",
       studentId: item.meeting.studentId || "",
       tutorId: item.meeting.tutor.id,
@@ -387,11 +480,13 @@ export default function AdminSchedulesPage() {
   async function savePattern(event: React.FormEvent) {
     event.preventDefault();
     setMutationError("");
-    if (!patternClassId)
-      return setMutationError("Pilih kelas terlebih dahulu.");
+    if (!patternClassId || !patternProgramId || !patternStartDate)
+      return setMutationError("Program, kelas, dan mulai berlaku wajib diisi.");
     setSaving(true);
     try {
       await api.put(`/schedules/patterns/${patternClassId}`, {
+        programId: patternProgramId,
+        startDate: patternStartDate,
         slots: slots.map((slot) => ({
           ...slot,
           dayOfWeek: Number(slot.dayOfWeek),
@@ -400,9 +495,7 @@ export default function AdminSchedulesPage() {
       setPatternOpen(false);
       await load();
     } catch (error: any) {
-      setMutationError(
-        errorMessage(error, "Gagal menyimpan pola jadwal."),
-      );
+      setMutationError(errorMessage(error, "Gagal menyimpan pola jadwal."));
     } finally {
       setSaving(false);
     }
@@ -410,13 +503,14 @@ export default function AdminSchedulesPage() {
   async function saveMeeting(event: React.FormEvent) {
     event.preventDefault();
     setMutationError("");
-    if (
-      !form.tutorId ||
-      !form.subjectId ||
-      (form.sessionType === "REGULAR" && !form.classId) ||
-      (form.sessionType === "PRIVATE" && !form.studentId)
-    )
-      return setMutationError("Lengkapi kelas/siswa, mapel, dan tentor.");
+    if (!form.programId)
+      return setMutationError("Program pada pertemuan ini belum ditentukan.");
+    if (form.sessionType === "REGULAR" && !form.classId)
+      return setMutationError("Kelas pada pertemuan ini belum ditentukan.");
+    if (form.sessionType === "PRIVATE" && !form.studentId)
+      return setMutationError("Pilih siswa.");
+    if (!form.subjectId) return setMutationError("Pilih mata pelajaran.");
+    if (!form.tutorId) return setMutationError("Pilih tentor.");
     setSaving(true);
     try {
       const payload = {
@@ -426,9 +520,21 @@ export default function AdminSchedulesPage() {
         classId: form.sessionType === "REGULAR" ? form.classId : undefined,
         studentId: form.sessionType === "PRIVATE" ? form.studentId : undefined,
         location:
-          form.mode === "OFFLINE" ? form.location || undefined : undefined,
+          form.mode === "OFFLINE"
+            ? form.location.trim() || undefined
+            : undefined,
       };
-      if (editing) {
+      if (completingOccurrence) {
+        await api.put(
+          `/schedules/occurrences/${completingOccurrence.id}/complete`,
+          {
+            subjectId: form.subjectId,
+            tutorId: form.tutorId,
+            mode: form.mode,
+            location: payload.location,
+          },
+        );
+      } else if (editing) {
         await api.put(`/schedules/meetings/${editing.id}`, payload);
       } else {
         await api.post("/schedules/meetings", payload);
@@ -437,10 +543,9 @@ export default function AdminSchedulesPage() {
       await load();
       setMeetingOpen(false);
       setEditing(null);
+      setCompletingOccurrence(null);
     } catch (error: any) {
-      setMutationError(
-        errorMessage(error, "Gagal menyimpan pertemuan."),
-      );
+      setMutationError(errorMessage(error, "Gagal menyimpan pertemuan."));
     } finally {
       setSaving(false);
     }
@@ -460,9 +565,7 @@ export default function AdminSchedulesPage() {
       setCancelReason("");
       await load();
     } catch (error: any) {
-      setMutationError(
-        errorMessage(error, "Gagal membatalkan pertemuan."),
-      );
+      setMutationError(errorMessage(error, "Gagal membatalkan pertemuan."));
     } finally {
       setCancelling(false);
     }
@@ -477,15 +580,16 @@ export default function AdminSchedulesPage() {
       setSelected(null);
       await load();
     } catch (error: any) {
-      setMutationError(
-        errorMessage(error, "Gagal menghapus pertemuan."),
-      );
+      setMutationError(errorMessage(error, "Gagal menghapus pertemuan."));
     } finally {
       setDeleting(false);
     }
   }
   const selectedPatternSlots = patterns
-    .filter((item) => item.classId === patternClassId)
+    .filter(
+      (item) =>
+        item.classId === patternClassId && item.programId === patternProgramId,
+    )
     .map((item) => ({
       dayOfWeek: String(item.dayOfWeek),
       startTime: time(item.startTime),
@@ -502,6 +606,8 @@ export default function AdminSchedulesPage() {
             <button
               onClick={() => {
                 setPatternClassId("");
+                setPatternProgramId("");
+                setPatternStartDate(iso(new Date()));
                 setSlots([
                   { dayOfWeek: "2", startTime: "16:00", endTime: "17:30" },
                 ]);
@@ -668,6 +774,23 @@ export default function AdminSchedulesPage() {
         >
           <form onSubmit={savePattern} className="space-y-4">
             <label className="block text-sm font-medium">
+              Program *
+              <select
+                value={patternProgramId}
+                onChange={(event) => setPatternProgramId(event.target.value)}
+                className="mt-1 w-full rounded-md border px-3 py-2"
+              >
+                <option value="">Pilih program</option>
+                {programs
+                  .filter((item) => item.learningModel === "CLASS_BASED")
+                  .map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label className="block text-sm font-medium">
               Kelas *
               <select
                 value={patternClassId}
@@ -675,9 +798,17 @@ export default function AdminSchedulesPage() {
                   const value = event.target.value;
                   setPatternClassId(value);
                   setSlots(
-                    patterns.filter((item) => item.classId === value).length
+                    patterns.filter(
+                      (item) =>
+                        item.classId === value &&
+                        item.programId === patternProgramId,
+                    ).length
                       ? patterns
-                          .filter((item) => item.classId === value)
+                          .filter(
+                            (item) =>
+                              item.classId === value &&
+                              item.programId === patternProgramId,
+                          )
                           .map((item) => ({
                             dayOfWeek: String(item.dayOfWeek),
                             startTime: time(item.startTime),
@@ -702,6 +833,23 @@ export default function AdminSchedulesPage() {
                 ))}
               </select>
             </label>
+            <label className="block text-sm font-medium">
+              Mulai Berlaku *
+              <input
+                type="date"
+                value={patternStartDate}
+                onChange={(event) => setPatternStartDate(event.target.value)}
+                className="mt-1 w-full rounded-md border px-3 py-2"
+              />
+            </label>
+            {patternProgramId && (
+              <p className="rounded-md bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                Pola ini akan membuat{" "}
+                {programs.find((item) => item.id === patternProgramId)
+                  ?.defaultMeetingQuota ?? 0}{" "}
+                pertemuan.
+              </p>
+            )}
             <div>
               <p className="mb-2 text-sm font-semibold">Jadwal Mingguan</p>
               {slots.map((slot, index) => (
@@ -794,11 +942,18 @@ export default function AdminSchedulesPage() {
       )}
       {meetingOpen && (
         <Modal
-          title={editing ? "Edit Pertemuan" : "Tambah Pertemuan"}
+          title={
+            completingOccurrence
+              ? "Lengkapi Pertemuan"
+              : editing
+                ? "Edit Pertemuan"
+                : "Tambah Pertemuan"
+          }
           onClose={() => {
             if (!saving) {
               setMeetingOpen(false);
               setEditing(null);
+              setCompletingOccurrence(null);
             }
           }}
           className="max-w-[680px]"
@@ -807,26 +962,36 @@ export default function AdminSchedulesPage() {
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Program *">
                 <select
-                  value={form.sessionType}
-                  disabled={Boolean(editing)}
+                  value={form.programId}
+                  disabled={Boolean(completingOccurrence)}
                   onChange={(event) =>
                     setForm({
                       ...form,
-                      sessionType: event.target.value,
+                      programId: event.target.value,
+                      sessionType:
+                        programs.find(
+                          (program) => program.id === event.target.value,
+                        )?.learningModel === "INDIVIDUAL"
+                          ? "PRIVATE"
+                          : "REGULAR",
                       classId: "",
                       studentId: "",
                     })
                   }
                 >
-                  <option value="REGULAR">Reguler</option>
-                  <option value="PRIVATE">Privat</option>
+                  <option value="">Pilih Program</option>
+                  {programs.map((program) => (
+                    <option key={program.id} value={program.id}>
+                      {program.name}
+                    </option>
+                  ))}
                 </select>
               </Field>
               {form.sessionType === "REGULAR" ? (
                 <Field label="Kelas *">
                   <select
                     value={form.classId}
-                    disabled={Boolean(editing)}
+                    disabled={Boolean(editing || completingOccurrence)}
                     onChange={(event) =>
                       setForm({ ...form, classId: event.target.value })
                     }
@@ -861,6 +1026,7 @@ export default function AdminSchedulesPage() {
                 <input
                   type="date"
                   value={form.sessionDate}
+                  disabled={Boolean(completingOccurrence)}
                   onChange={(event) =>
                     setForm({ ...form, sessionDate: event.target.value })
                   }
@@ -870,6 +1036,7 @@ export default function AdminSchedulesPage() {
                 <input
                   type="time"
                   value={form.startTime}
+                  disabled={Boolean(completingOccurrence)}
                   onChange={(event) =>
                     setForm({ ...form, startTime: event.target.value })
                   }
@@ -879,6 +1046,7 @@ export default function AdminSchedulesPage() {
                 <input
                   type="time"
                   value={form.endTime}
+                  disabled={Boolean(completingOccurrence)}
                   onChange={(event) =>
                     setForm({ ...form, endTime: event.target.value })
                   }
@@ -932,7 +1100,7 @@ export default function AdminSchedulesPage() {
                 </select>
               </Field>
               {form.mode === "OFFLINE" && (
-                <Field label="Lokasi">
+                <Field label="Lokasi (opsional)">
                   <input
                     value={form.location}
                     onChange={(event) =>
@@ -992,8 +1160,16 @@ export default function AdminSchedulesPage() {
             </p>
             {selected.meeting?.changeRequests?.[0] && (
               <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900">
-                <b>Pengajuan perubahan:</b> Menunggu Admin<br />
-                Usulan {new Intl.DateTimeFormat("id-ID", { dateStyle: "medium" }).format(new Date(selected.meeting.changeRequests[0].proposedDate))}, {time(selected.meeting.changeRequests[0].proposedStartTime)}–{time(selected.meeting.changeRequests[0].proposedEndTime)}
+                <b>Pengajuan perubahan:</b> Menunggu Admin
+                <br />
+                Usulan{" "}
+                {new Intl.DateTimeFormat("id-ID", {
+                  dateStyle: "medium",
+                }).format(
+                  new Date(selected.meeting.changeRequests[0].proposedDate),
+                )}
+                , {time(selected.meeting.changeRequests[0].proposedStartTime)}–
+                {time(selected.meeting.changeRequests[0].proposedEndTime)}
               </div>
             )}
             {selected.meeting && selected.calendarState !== "WAITING_NOTE" && (

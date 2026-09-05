@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "../utils/prisma";
 import { AppError } from "../utils/errors";
 import { logAudit } from "../utils/auditLog";
+import { nextBusinessCode } from "../utils/businessCode";
 
 const SALT_ROUNDS = 10;
 
@@ -45,6 +46,7 @@ export async function createTutor(data: {
 
     const tutor = await tx.tutor.create({
       data: {
+        tutorCode: await nextBusinessCode(tx, "tutor"),
         userId: user.id,
         name: data.name,
         email: data.email,
@@ -69,6 +71,37 @@ export async function createTutor(data: {
         },
       },
     });
+  });
+}
+
+/** Admin-only password recovery for an existing Tutor account. */
+export async function resetTutorPassword(
+  id: string,
+  newPassword: string,
+  adminId: string,
+) {
+  return prisma.$transaction(async (tx) => {
+    const tutor = await tx.tutor.findUnique({
+      where: { id },
+      include: { user: { select: { id: true } } },
+    });
+    if (!tutor) throw new AppError("Tentor tidak ditemukan.", 404);
+    if (!tutor.user) throw new AppError("Akun tentor tidak ditemukan.", 404);
+
+    await tx.user.update({
+      where: { id: tutor.user.id },
+      data: { passwordHash: await bcrypt.hash(newPassword, SALT_ROUNDS) },
+    });
+    await logAudit(
+      {
+        tableName: "tutors",
+        recordId: tutor.id,
+        action: "UPDATE",
+        changedBy: adminId,
+        reason: `Reset password akun tentor ${tutor.tutorCode} (${tutor.name})`,
+      },
+      tx,
+    );
   });
 }
 

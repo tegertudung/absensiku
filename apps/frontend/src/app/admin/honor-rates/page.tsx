@@ -50,12 +50,21 @@ const formatProgramDate = (value: string) =>
     month: "short",
     year: "numeric",
   }).format(new Date(value));
+const businessDateKey = (value: string | Date) => {
+  const date = new Date(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 const empty = {
   name: "",
   code: "",
   learningModel: "INDIVIDUAL",
   usesQuota: true,
   defaultMeetingQuota: "24",
+  honorNominal: "",
+  honorEffectiveFrom: "",
 };
 const err = (e: any, f: string) =>
   e.response?.data?.message ||
@@ -102,21 +111,21 @@ export default function AdminHonorRatesPage() {
   useEffect(() => {
     load();
   }, [load]);
-  const today = new Date();
+  const today = businessDateKey(new Date());
   const current = (p: P) =>
     rates.find(
       (r) =>
         r.program?.id === p.id &&
         r.status === "ACTIVE" &&
-        new Date(r.effectiveFrom) <= today &&
-        (!r.effectiveTo || new Date(r.effectiveTo) >= today),
+        businessDateKey(r.effectiveFrom) <= today &&
+        (!r.effectiveTo || businessDateKey(r.effectiveTo) >= today),
     );
   const futures = (p: P) =>
     rates.filter(
       (r) =>
         r.program?.id === p.id &&
         r.status === "ACTIVE" &&
-        new Date(r.effectiveFrom) > today,
+        businessDateKey(r.effectiveFrom) > today,
     );
   const visible = useMemo(
     () =>
@@ -133,11 +142,11 @@ export default function AdminHonorRatesPage() {
   const active = rates.filter(
     (r) =>
       r.status === "ACTIVE" &&
-      new Date(r.effectiveFrom) <= today &&
-      (!r.effectiveTo || new Date(r.effectiveTo) >= today),
+      businessDateKey(r.effectiveFrom) <= today &&
+      (!r.effectiveTo || businessDateKey(r.effectiveTo) >= today),
   );
   const future = rates.filter(
-    (r) => r.status === "ACTIVE" && new Date(r.effectiveFrom) > today,
+    (r) => r.status === "ACTIVE" && businessDateKey(r.effectiveFrom) > today,
   );
   function open(p?: P) {
     setProgramOpen(true);
@@ -150,6 +159,8 @@ export default function AdminHonorRatesPage() {
             learningModel: p.learningModel,
             usesQuota: p.usesQuota,
             defaultMeetingQuota: String(p.defaultMeetingQuota),
+            honorNominal: "",
+            honorEffectiveFrom: "",
           }
         : empty,
     );
@@ -162,10 +173,14 @@ export default function AdminHonorRatesPage() {
       !form.name.trim() ||
       (!editing && !form.code.trim()) ||
       !Number.isInteger(q) ||
-      q < 1
+      q < 1 ||
+      (!editing &&
+        (!Number.isFinite(Number(form.honorNominal)) ||
+          Number(form.honorNominal) <= 0 ||
+          !form.honorEffectiveFrom))
     ) {
       setError(
-        "Nama, kode, dan kuota standar minimal 1 pertemuan wajib diisi.",
+        "Lengkapi nama, kode, kuota, honor per sesi, dan tanggal berlaku.",
       );
       return;
     }
@@ -182,6 +197,8 @@ export default function AdminHonorRatesPage() {
         : await api.post("/programs", {
             ...data,
             code: form.code.trim().toUpperCase(),
+            honorNominal: Number(form.honorNominal),
+            honorEffectiveFrom: form.honorEffectiveFrom,
           });
       setEditing(null);
       setNotice("Program berhasil disimpan.");
@@ -221,7 +238,8 @@ export default function AdminHonorRatesPage() {
     try {
       await api.post("/honor-rates", {
         programId: rateProgram.id,
-        sessionType: rateProgram.code,
+        sessionType:
+          rateProgram.learningModel === "CLASS_BASED" ? "REGULAR" : "PRIVATE",
         nominal: Number(rateForm.nominal),
         effectiveFrom: rateForm.effectiveFrom,
       });
@@ -480,6 +498,48 @@ export default function AdminHonorRatesPage() {
               value={form.defaultMeetingQuota}
               onChange={(v) => setForm({ ...form, defaultMeetingQuota: v })}
             />
+            {!editing ? (
+              <>
+                <Field
+                  label="Honor Tentor / Sesi"
+                  type="number"
+                  value={form.honorNominal}
+                  onChange={(v) => setForm({ ...form, honorNominal: v })}
+                />
+                <Field
+                  label="Berlaku Mulai"
+                  type="date"
+                  value={form.honorEffectiveFrom}
+                  onChange={(v) => setForm({ ...form, honorEffectiveFrom: v })}
+                />
+              </>
+            ) : null}
+            {editing ? (
+              <div className="border-t pt-4">
+                <p className="text-xs text-gray-500">Tarif Honor Aktif</p>
+                <p className="mt-1 text-sm font-medium text-gray-900">
+                  {current(editing)
+                    ? `${formatRupiah(current(editing)!.nominal)} / sesi`
+                    : "Belum diatur"}
+                </p>
+                {current(editing) ? (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Berlaku sejak{" "}
+                    {formatProgramDate(current(editing)!.effectiveFrom)}
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRateForm({ nominal: "", effectiveFrom: "" });
+                    setRateProgram(editing);
+                  }}
+                  className="mt-3 rounded-md border border-navy-200 px-3 py-2 text-sm font-medium text-navy-800"
+                >
+                  {current(editing) ? "Ubah Tarif Honor" : "Atur Tarif Honor"}
+                </button>
+              </div>
+            ) : null}
             <Buttons
               saving={saving}
               label={editing ? "Simpan Perubahan" : "Tambah Program"}
@@ -533,17 +593,15 @@ export default function AdminHonorRatesPage() {
                       value={`${formatRupiah(r.nominal)} · ${formatDate(r.effectiveFrom)}`}
                     />
                   ))}
-                  {core(detail) && (
-                    <button
-                      onClick={() => {
-                        setRateForm({ nominal: "", effectiveFrom: "" });
-                        setRateProgram(detail);
-                      }}
-                      className="mt-4 rounded-md bg-navy-900 px-4 py-2 text-sm text-white"
-                    >
-                      + Atur Tarif Baru
-                    </button>
-                  )}
+                  <button
+                    onClick={() => {
+                      setRateForm({ nominal: "", effectiveFrom: "" });
+                      setRateProgram(detail);
+                    }}
+                    className="mt-4 rounded-md bg-navy-900 px-4 py-2 text-sm text-white"
+                  >
+                    Ubah Tarif Honor
+                  </button>
                   <div className="mt-4 text-xs">
                     {history
                       .filter((h) => h.rate.program?.id === detail.id)
@@ -557,11 +615,18 @@ export default function AdminHonorRatesPage() {
                   </div>
                 </>
               ) : (
-                <p className="mt-3 rounded-md bg-slate-50 p-3 text-sm text-gray-600">
-                  Tarif honor untuk program ini belum dapat dikonfigurasi.
-                  Dukungan tarif program dinamis belum tersedia pada alur
-                  operasional saat ini.
-                </p>
+                <>
+                  <p className="mt-3 text-sm text-gray-600">Belum diatur</p>
+                  <button
+                    onClick={() => {
+                      setRateForm({ nominal: "", effectiveFrom: "" });
+                      setRateProgram(detail);
+                    }}
+                    className="mt-4 rounded-md bg-navy-900 px-4 py-2 text-sm text-white"
+                  >
+                    Atur Tarif Honor
+                  </button>
+                </>
               )}
             </div>
           </div>

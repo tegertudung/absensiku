@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import api from "@/lib/api";
 import Modal from "@/components/Modal";
@@ -10,10 +10,11 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { IconPlus, IconSearch } from "@/components/icons";
 import AdminTableActions from "@/components/TableActionMenu";
 import StatCard from "@/components/StatCard";
-import { IconClasses, IconPrivate } from "@/components/icons";
+import { IconClasses } from "@/components/icons";
 
 interface Student {
   id: string;
+  studentCode: string;
   name: string;
   phone: string | null;
   guardianName: string | null;
@@ -23,13 +24,7 @@ interface Student {
   schoolClass: string | null;
   status: string;
   hasOperationalHistory: boolean;
-  programs: Array<{
-    type: "REGULAR" | "PRIVATE";
-    label: string;
-    quotaTotal: number;
-    quotaUsed: number;
-    quotaRemaining: number;
-  }>;
+  programEnrollments: ProgramEnrollment[];
 }
 
 interface PrivatePackage {
@@ -45,8 +40,29 @@ interface PrivatePackage {
 interface ClassOption {
   id: string;
   name: string;
+  programId: string | null;
+  status: string;
   subject: { name: string } | null;
 }
+
+interface ProgramOption {
+  id: string;
+  code: string;
+  name: string;
+  learningModel: "CLASS_BASED" | "INDIVIDUAL";
+  isActive: boolean;
+}
+
+interface ProgramEnrollment {
+  id?: string;
+  programId: string;
+  classId: string | null;
+  status?: string;
+  program?: ProgramOption;
+  class?: ClassOption | null;
+}
+
+type ProgramEnrollmentInput = Pick<ProgramEnrollment, "programId" | "classId">;
 
 const STATUS_OPTIONS = ["ACTIVE", "INACTIVE", "GRADUATED"];
 const STATUS_LABELS: Record<string, string> = {
@@ -61,11 +77,193 @@ const PACKAGE_STATUS_LABELS: Record<string, string> = {
   CANCELLED: "Dibatalkan",
 };
 
+function ProgramEnrollmentFields({
+  programs,
+  classes,
+  enrollments,
+  disabled,
+  classesLoading,
+  error,
+  onChange,
+}: {
+  programs: ProgramOption[];
+  classes: ClassOption[];
+  enrollments: ProgramEnrollmentInput[];
+  disabled: boolean;
+  classesLoading: boolean;
+  error: string | null;
+  onChange: (enrollments: ProgramEnrollmentInput[]) => void;
+}) {
+  const selected = (programId: string) =>
+    enrollments.find((enrollment) => enrollment.programId === programId);
+
+  return (
+    <section className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className="mb-4">
+        <h2 className="text-sm font-semibold text-gray-900">Program Belajar</h2>
+        <p className="mt-1 text-xs leading-5 text-gray-500">
+          Pilih satu atau beberapa program yang diikuti siswa.
+        </p>
+      </div>
+      <fieldset disabled={disabled}>
+        <legend className="sr-only">Pilih program belajar</legend>
+        <div className="space-y-3">
+          {programs.map((program) => {
+            const enrollment = selected(program.id);
+            const availableClasses = classes.filter(
+              (classItem) => classItem.status !== "INACTIVE",
+            );
+            const isClassBased = program.learningModel === "CLASS_BASED";
+            return (
+              <div
+                key={program.id}
+                className={`rounded-lg border p-3 ${enrollment ? "border-navy-600 bg-navy-50" : "border-gray-200"}`}
+              >
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(enrollment)}
+                    onChange={() =>
+                      onChange(
+                        enrollment
+                          ? enrollments.filter(
+                              (item) => item.programId !== program.id,
+                            )
+                          : [
+                              ...enrollments,
+                              { programId: program.id, classId: null },
+                            ],
+                      )
+                    }
+                    className="mt-0.5 h-4 w-4 border-gray-300 text-navy-700 focus:ring-navy-500"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-gray-900">
+                      {program.name}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-gray-500">
+                      {isClassBased ? "Berbasis Kelas" : "Individual"}
+                      {!program.isActive ? " · Nonaktif" : ""}
+                    </span>
+                  </span>
+                </label>
+                {enrollment && isClassBased ? (
+                  <label className="mt-3 block text-xs font-medium text-gray-700">
+                    Kelas <span className="text-red-600">*</span>
+                    <select
+                      value={enrollment.classId || ""}
+                      onChange={(event) =>
+                        onChange(
+                          enrollments.map((item) =>
+                            item.programId === program.id
+                              ? { ...item, classId: event.target.value || null }
+                              : item,
+                          ),
+                        )
+                      }
+                      disabled={classesLoading || availableClasses.length === 0}
+                      className="mt-1.5 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-normal text-gray-900"
+                    >
+                      <option value="">
+                        {classesLoading
+                          ? "Memuat kelas..."
+                          : availableClasses.length
+                            ? `Pilih kelas ${program.name}`
+                            : "Belum ada kelas tersedia."}
+                      </option>
+                      {availableClasses.map((classItem) => (
+                        <option key={classItem.id} value={classItem.id}>
+                          {classItem.name}
+                        </option>
+                      ))}
+                    </select>
+                    {availableClasses.length === 0 && !classesLoading ? (
+                      <span className="mt-1 block font-normal text-red-700">
+                        Belum ada kelas tersedia.
+                      </span>
+                    ) : null}
+                  </label>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </fieldset>
+      {error ? (
+        <p role="alert" className="mt-3 text-xs text-red-700">
+          {error}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function ProgramClassSelectors({
+  programs,
+  classes,
+  enrollments,
+  disabled,
+  onChange,
+}: {
+  programs: ProgramOption[];
+  classes: ClassOption[];
+  enrollments: ProgramEnrollmentInput[];
+  disabled: boolean;
+  onChange: (programId: string, classId: string | null) => void;
+}) {
+  return (
+    <div className="mt-4 space-y-3">
+      {enrollments.map((enrollment) => {
+        const program = programs.find(
+          (item) => item.id === enrollment.programId,
+        );
+        if (!program || program.learningModel !== "CLASS_BASED") return null;
+        const availableClasses = classes.filter(
+          (classItem) => classItem.status !== "INACTIVE",
+        );
+        return (
+          <label
+            key={program.id}
+            className="block rounded-lg border border-gray-200 p-3 text-xs font-medium text-gray-700"
+          >
+            Kelas {program.name} <span className="text-red-600">*</span>
+            <select
+              value={enrollment.classId || ""}
+              onChange={(event) =>
+                onChange(program.id, event.target.value || null)
+              }
+              disabled={disabled || availableClasses.length === 0}
+              className="mt-1.5 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-normal text-gray-900"
+            >
+              <option value="">
+                {availableClasses.length
+                  ? `Pilih kelas ${program.name}`
+                  : "Belum ada kelas tersedia."}
+              </option>
+              {availableClasses.map((classItem) => (
+                <option key={classItem.id} value={classItem.id}>
+                  {classItem.name}
+                </option>
+              ))}
+            </select>
+            {availableClasses.length === 0 ? (
+              <span className="mt-1 block font-normal text-red-700">
+                Belum ada kelas tersedia.
+              </span>
+            ) : null}
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function AdminStudentsPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const createInFlightRef = useRef(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [phoneError, setPhoneError] = useState<string | null>(null);
   const [programError, setProgramError] = useState<string | null>(null);
@@ -85,6 +283,9 @@ export default function AdminStudentsPage() {
     guardianPhone: "",
     classId: "",
   });
+  const [editProgramEnrollments, setEditProgramEnrollments] = useState<
+    ProgramEnrollmentInput[]
+  >([]);
   const [editError, setEditError] = useState<string | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [packageConfirm, setPackageConfirm] = useState<
@@ -97,7 +298,10 @@ export default function AdminStudentsPage() {
     guardianName: "",
     guardianPhone: "",
   });
-  const [program, setProgram] = useState<"REGULAR" | "PRIVATE">("REGULAR");
+  const [programOptions, setProgramOptions] = useState<ProgramOption[]>([]);
+  const [programEnrollments, setProgramEnrollments] = useState<
+    Array<{ programId: string; classId: string | null }>
+  >([]);
   const [classes, setClasses] = useState<ClassOption[]>([]);
   const [classesLoading, setClassesLoading] = useState(false);
   const [selectedClassId, setSelectedClassId] = useState("");
@@ -112,8 +316,12 @@ export default function AdminStudentsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await api.get("/students");
+      const [res, programsRes] = await Promise.all([
+        api.get("/students"),
+        api.get("/programs", { params: { active: "true" } }),
+      ]);
       setStudents(res.data.data);
+      setProgramOptions(programsRes.data.data);
     } finally {
       setLoading(false);
     }
@@ -129,7 +337,7 @@ export default function AdminStudentsPage() {
       const res = await api.get("/classes");
       setClasses(res.data.data);
     } catch {
-      setProgramError("Gagal memuat kelas reguler. Silakan coba lagi.");
+      setProgramError("Gagal memuat kelas. Silakan coba lagi.");
     } finally {
       setClassesLoading(false);
     }
@@ -137,8 +345,7 @@ export default function AdminStudentsPage() {
 
   function resetCreateForm() {
     setForm({ name: "", phone: "", guardianName: "", guardianPhone: "" });
-    setProgram("REGULAR");
-    setSelectedClassId("");
+    setProgramEnrollments([]);
     setCreatedStudentId(null);
     setFormError(null);
     setPhoneError(null);
@@ -149,39 +356,44 @@ export default function AdminStudentsPage() {
     setSuccessMessage(null);
     resetCreateForm();
     setShowForm(true);
-    await loadClasses();
+    await Promise.all([
+      loadClasses(),
+      api
+        .get("/programs", { params: { active: "true" } })
+        .then((res) => setProgramOptions(res.data.data)),
+    ]);
   }
 
   async function closeCreateForm() {
-    if (saving) return;
+    if (saving || createInFlightRef.current) return;
     setShowForm(false);
     if (createdStudentId) await load();
     resetCreateForm();
   }
 
-  function validateProgram() {
+  function validateProgram(enrollments: ProgramEnrollmentInput[]) {
+    if (!enrollments.length) {
+      setProgramError("Pilih minimal satu program belajar.");
+      return false;
+    }
+    const invalidEnrollment = enrollments.find((enrollment) => {
+      const program = programOptions.find(
+        (item) => item.id === enrollment.programId,
+      );
+      return program?.learningModel === "CLASS_BASED" && !enrollment.classId;
+    });
+    if (invalidEnrollment) {
+      const program = programOptions.find(
+        (item) => item.id === invalidEnrollment.programId,
+      );
+      setProgramError(`Pilih kelas untuk program ${program?.name || "ini"}.`);
+      return false;
+    }
     return true;
   }
 
-  async function assignProgram(studentId: string) {
-    if (program === "REGULAR") {
-      if (selectedClassId)
-        await api.post(`/classes/${selectedClassId}/enrollments`, {
-          studentId,
-        });
-      return;
-    }
-    await api.post("/private-packages", { studentId, quotaTotal: 24 });
-  }
-
   async function finishCreate() {
-    setSuccessMessage(
-      program === "REGULAR"
-        ? selectedClassId
-          ? "Siswa berhasil ditambahkan ke kelas reguler."
-          : "Siswa reguler berhasil ditambahkan dan belum ditempatkan."
-        : "Siswa privat berhasil ditambahkan dan paket diaktifkan.",
-    );
+    setSuccessMessage("Siswa dan program belajar berhasil ditambahkan.");
     setShowForm(false);
     resetCreateForm();
     await load();
@@ -189,6 +401,7 @@ export default function AdminStudentsPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
+    if (saving) return;
     setFormError(null);
     setProgramError(null);
 
@@ -206,29 +419,27 @@ export default function AdminStudentsPage() {
       return;
     }
     setPhoneError(null);
-    if (!validateProgram()) return;
+    if (!validateProgram(programEnrollments)) return;
 
+    createInFlightRef.current = true;
     setSaving(true);
     try {
       const studentId =
         createdStudentId ||
-        (await api.post("/students", { ...form, phone: normalizedPhone })).data
-          .data.id;
+        (
+          await api.post("/students", {
+            ...form,
+            phone: normalizedPhone,
+            programEnrollments,
+          })
+        ).data.data.id;
       if (!createdStudentId) setCreatedStudentId(studentId);
 
-      try {
-        await assignProgram(studentId);
-        await finishCreate();
-      } catch (err: any) {
-        setFormError(
-          program === "REGULAR"
-            ? "Siswa berhasil dibuat, tetapi belum berhasil dimasukkan ke kelas. Silakan coba lagi."
-            : "Siswa berhasil dibuat, tetapi paket privat belum berhasil diaktifkan. Silakan coba lagi.",
-        );
-      }
+      await finishCreate();
     } catch (err: any) {
       setFormError(err.response?.data?.message || "Gagal menambah siswa");
     } finally {
+      createInFlightRef.current = false;
       setSaving(false);
     }
   }
@@ -304,19 +515,20 @@ export default function AdminStudentsPage() {
   const visibleStudents = students.filter((student) => {
     const query = search.toLocaleLowerCase();
     const matchesSearch =
+      student.studentCode.toLocaleLowerCase().includes(query) ||
       student.name.toLocaleLowerCase().includes(query) ||
       (student.phone || "").includes(search);
     const matchesStatus =
       statusFilter === "ALL" || student.status === statusFilter;
     const matchesProgram =
       programFilter === "ALL" ||
-      student.programs.some((item) => item.type === programFilter);
+      student.programEnrollments.some(
+        (enrollment) =>
+          enrollment.programId === programFilter &&
+          enrollment.status !== "INACTIVE",
+      );
     return matchesSearch && matchesStatus && matchesProgram;
   });
-
-  const availableProgramTypes = new Set(
-    students.flatMap((student) => student.programs.map((item) => item.type)),
-  );
 
   function initials(name: string) {
     return name
@@ -346,17 +558,38 @@ export default function AdminStudentsPage() {
 
   async function openEdit(student: Student) {
     setEditError(null);
-    const [detailRes] = await Promise.all([
+    const [detailRes, , programsRes] = await Promise.all([
       api.get(`/students/${student.id}`),
       loadClasses(),
+      api.get("/programs", { params: { active: "true" } }),
+    ]);
+    const detail = detailRes.data.data as {
+      programEnrollments?: ProgramEnrollment[];
+    };
+    const existingPrograms = (detail.programEnrollments || [])
+      .map((enrollment) => enrollment.program)
+      .filter((program): program is ProgramOption => Boolean(program));
+    const activePrograms = programsRes.data.data as ProgramOption[];
+    setProgramOptions([
+      ...activePrograms,
+      ...existingPrograms.filter(
+        (existing) =>
+          !activePrograms.some((active) => active.id === existing.id),
+      ),
     ]);
     setEditForm({
       name: student.name,
       phone: student.phone || "",
       guardianName: student.guardianName || "",
       guardianPhone: student.guardianPhone || "",
-      classId: detailRes.data.data.enrollments?.[0]?.class?.id || "",
+      classId: "",
     });
+    setEditProgramEnrollments(
+      (detail.programEnrollments || []).map((enrollment) => ({
+        programId: enrollment.programId,
+        classId: enrollment.classId || enrollment.class?.id || null,
+      })),
+    );
     setEditingStudent(student);
   }
 
@@ -368,6 +601,10 @@ export default function AdminStudentsPage() {
     if (!phone) return setEditError("Nomor telepon wajib diisi.");
     if (phone.length > 13)
       return setEditError("Nomor telepon maksimal 13 digit.");
+    if (!validateProgram(editProgramEnrollments)) {
+      setEditError("Lengkapi program belajar siswa.");
+      return;
+    }
     setEditSaving(true);
     setEditError(null);
     try {
@@ -375,7 +612,7 @@ export default function AdminStudentsPage() {
         ...editForm,
         name: editForm.name.trim(),
         phone,
-        classId: editForm.classId || null,
+        programEnrollments: editProgramEnrollments,
       });
       setEditingStudent(null);
       setSuccessMessage("Data siswa berhasil diperbarui.");
@@ -401,7 +638,7 @@ export default function AdminStudentsPage() {
       </nav>
       <PageHeader
         title="Siswa"
-        description="Kelola data siswa, kelas reguler, dan paket privat."
+        description="Kelola data siswa dan program belajar."
         action={
           <button
             onClick={openCreateForm}
@@ -413,29 +650,19 @@ export default function AdminStudentsPage() {
         }
       />
 
-      <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3">
+      <div className="mb-5 grid grid-cols-2 gap-3">
         <StatCard
           label="Total Siswa"
           value={students.length}
           icon={<IconClasses className="h-5 w-5" />}
         />
         <StatCard
-          label="Siswa Reguler"
-          value={
-            students.filter((student) =>
-              student.programs.some((item) => item.type === "REGULAR"),
-            ).length
-          }
+          label="Total Program Diikuti"
+          value={students.reduce(
+            (total, student) => total + student.programEnrollments.length,
+            0,
+          )}
           icon={<IconClasses className="h-5 w-5" />}
-        />
-        <StatCard
-          label="Siswa Privat"
-          value={
-            students.filter((student) =>
-              student.programs.some((item) => item.type === "PRIVATE"),
-            ).length
-          }
-          icon={<IconPrivate className="h-5 w-5" />}
         />
       </div>
 
@@ -446,7 +673,7 @@ export default function AdminStudentsPage() {
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Cari nama atau nomor telepon siswa"
+              placeholder="Cari kode, nama, atau nomor telepon siswa"
               aria-label="Cari nama siswa"
               className="h-10 w-full rounded-lg border border-gray-300 bg-white pl-9 pr-3 text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:border-navy-500 focus:ring-2 focus:ring-navy-100"
             />
@@ -454,21 +681,22 @@ export default function AdminStudentsPage() {
           <select
             value={programFilter}
             onChange={(event) => setProgramFilter(event.target.value)}
-            disabled={availableProgramTypes.size === 0}
+            disabled={programOptions.length === 0}
             aria-label="Filter program"
             className="h-10 rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-700 outline-none focus:border-navy-500 focus:ring-2 focus:ring-navy-100 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400"
           >
             <option value="ALL">
-              {availableProgramTypes.size === 0
+              {programOptions.length === 0
                 ? "Program belum tersedia"
                 : "Semua Program"}
             </option>
-            {availableProgramTypes.has("REGULAR") && (
-              <option value="REGULAR">Reguler</option>
-            )}
-            {availableProgramTypes.has("PRIVATE") && (
-              <option value="PRIVATE">Privat</option>
-            )}
+            {programOptions
+              .filter((program) => program.isActive)
+              .map((program) => (
+                <option key={program.id} value={program.id}>
+                  {program.name}
+                </option>
+              ))}
           </select>
           <select
             value={statusFilter}
@@ -492,8 +720,7 @@ export default function AdminStudentsPage() {
             <tr className="border-b border-gray-200 bg-gray-50/80 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500">
               <th className="px-5 py-3">Nama Siswa</th>
               <th className="px-4 py-3">Program</th>
-              <th className="px-4 py-3">Kelas / Paket</th>
-              <th className="px-4 py-3">Sisa Sesi</th>
+              <th className="px-4 py-3">Kelas</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-5 py-3 text-right">Aksi</th>
             </tr>
@@ -502,7 +729,7 @@ export default function AdminStudentsPage() {
             {loading ? (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={5}
                   className="px-4 py-10 text-center text-gray-400"
                 >
                   Memuat...
@@ -511,7 +738,7 @@ export default function AdminStudentsPage() {
             ) : visibleStudents.length === 0 ? (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={5}
                   className="px-4 py-10 text-center text-gray-400"
                 >
                   {students.length === 0
@@ -537,6 +764,9 @@ export default function AdminStudentsPage() {
                         >
                           {s.name}
                         </Link>
+                        <p className="mt-0.5 text-xs font-semibold text-navy-700">
+                          {s.studentCode}
+                        </p>
                         <p className="mt-0.5 truncate text-xs text-gray-500">
                           {s.phone || "Kontak belum tersedia"}
                         </p>
@@ -544,82 +774,31 @@ export default function AdminStudentsPage() {
                     </div>
                   </td>
                   <td className="px-4 py-3.5">
-                    {s.programs.length === 0 ? (
+                    {s.programEnrollments.length === 0 ? (
                       <span className="text-xs text-gray-400">
                         Belum ada program
                       </span>
                     ) : (
                       <div className="flex flex-wrap gap-1">
-                        {s.programs.map((item, index) => (
+                        {s.programEnrollments.map((enrollment) => (
                           <span
-                            key={`${item.type}-${item.label}-${index}`}
-                            className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${item.type === "PRIVATE" ? "bg-navy-100 text-navy-800" : "bg-blue-100 text-blue-800"}`}
+                            key={enrollment.programId}
+                            className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-800"
                           >
-                            {item.type === "PRIVATE" ? "Privat" : "Reguler"}
+                            {enrollment.program?.name || "Program"}
                           </span>
                         ))}
                       </div>
                     )}
                   </td>
                   <td className="px-4 py-3.5 text-xs text-gray-600">
-                    {s.programs.length
-                      ? s.programs.map((item, index) => (
-                          <p key={`${item.type}-${item.label}-${index}`}>
-                            {item.label}
+                    {s.programEnrollments.length
+                      ? s.programEnrollments.map((enrollment) => (
+                          <p key={enrollment.programId}>
+                            {enrollment.class?.name || "Individual"}
                           </p>
                         ))
                       : "-"}
-                  </td>
-                  <td className="px-4 py-3.5">
-                    {s.programs.length ? (
-                      <div className="space-y-1">
-                        {s.programs.map((item, index) => {
-                          const isEmpty = item.quotaRemaining === 0;
-                          const isLow =
-                            item.quotaRemaining > 0 && item.quotaRemaining <= 3;
-                          const progress = item.quotaTotal
-                            ? Math.max(
-                                0,
-                                Math.min(
-                                  100,
-                                  (item.quotaRemaining / item.quotaTotal) * 100,
-                                ),
-                              )
-                            : 0;
-                          return (
-                            <div
-                              key={`${item.type}-${item.label}-${index}`}
-                              className="min-w-[100px]"
-                            >
-                              <p
-                                className={`text-xs font-medium ${isEmpty ? "text-red-700" : isLow ? "text-amber-700" : "text-gray-700"}`}
-                              >
-                                {item.quotaRemaining} / {item.quotaTotal}
-                              </p>
-                              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-gray-100">
-                                <div
-                                  className={
-                                    isEmpty
-                                      ? "h-full bg-red-500"
-                                      : isLow
-                                        ? "h-full bg-amber-500"
-                                        : "h-full bg-navy-600"
-                                  }
-                                  style={{ width: `${progress}%` }}
-                                />
-                              </div>
-                              {isEmpty && (
-                                <p className="mt-0.5 text-[10px] font-medium text-red-600">
-                                  Pertemuan habis
-                                </p>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      "-"
-                    )}
                   </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={s.status} />
@@ -780,49 +959,52 @@ export default function AdminStudentsPage() {
                   Program Belajar
                 </h2>
                 <p className="mt-1 text-xs leading-5 text-gray-500">
-                  Tentukan program awal siswa.
+                  Pilih satu atau beberapa program yang diikuti siswa.
                 </p>
               </div>
               <fieldset disabled={saving || Boolean(createdStudentId)}>
                 <legend className="sr-only">Pilih program belajar</legend>
                 <div className="grid gap-3 sm:grid-cols-2">
-                  {[
-                    {
-                      value: "REGULAR",
-                      label: "Reguler",
-                      description: "Daftarkan siswa ke kelas reguler.",
-                    },
-                    {
-                      value: "PRIVATE",
-                      label: "Privat",
-                      description: "Aktifkan paket sesi privat.",
-                    },
-                  ].map((option) => (
+                  {programOptions.map((option) => (
                     <label
-                      key={option.value}
+                      key={option.id}
                       className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
-                        program === option.value
+                        programEnrollments.some(
+                          (item) => item.programId === option.id,
+                        )
                           ? "border-navy-600 bg-navy-50 ring-1 ring-navy-600"
                           : "border-gray-200 hover:border-gray-300"
                       } ${saving || createdStudentId ? "cursor-not-allowed opacity-70" : ""}`}
                     >
                       <input
-                        type="radio"
-                        name="student-program"
-                        value={option.value}
-                        checked={program === option.value}
+                        type="checkbox"
+                        value={option.id}
+                        checked={programEnrollments.some(
+                          (item) => item.programId === option.id,
+                        )}
                         onChange={() => {
-                          setProgram(option.value as "REGULAR" | "PRIVATE");
+                          setProgramEnrollments((current) =>
+                            current.some((item) => item.programId === option.id)
+                              ? current.filter(
+                                  (item) => item.programId !== option.id,
+                                )
+                              : [
+                                  ...current,
+                                  { programId: option.id, classId: null },
+                                ],
+                          );
                           setProgramError(null);
                         }}
                         className="mt-0.5 h-4 w-4 border-gray-300 text-navy-700 focus:ring-navy-500"
                       />
                       <span>
                         <span className="block text-sm font-medium text-gray-900">
-                          {option.label}
+                          {option.name}
                         </span>
                         <span className="mt-0.5 block text-xs leading-5 text-gray-500">
-                          {option.description}
+                          {option.learningModel === "CLASS_BASED"
+                            ? "Berbasis Kelas"
+                            : "Individual"}
                         </span>
                       </span>
                     </label>
@@ -830,59 +1012,97 @@ export default function AdminStudentsPage() {
                 </div>
               </fieldset>
 
-              <div className="mt-4">
-                {program === "REGULAR" ? (
-                  <div>
-                    <label
-                      htmlFor="regular-class"
-                      className="mb-1.5 block text-xs font-medium text-gray-700"
-                    >
-                      Kelas Reguler{" "}
-                      <span className="text-gray-400">(opsional)</span>
-                    </label>
-                    <select
-                      id="regular-class"
-                      value={selectedClassId}
-                      onChange={(e) => {
-                        setSelectedClassId(e.target.value);
-                        setProgramError(null);
-                      }}
-                      disabled={
-                        saving || Boolean(createdStudentId) || classesLoading
-                      }
-                      className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-navy-500 focus:ring-2 focus:ring-navy-100 disabled:bg-gray-50 disabled:text-gray-500"
-                    >
-                      <option value="">
-                        {classesLoading
-                          ? "Memuat kelas..."
-                          : classes.length
-                            ? "Belum ditentukan"
-                            : "Belum ada kelas tersedia"}
-                      </option>
-                      {classes.map((kelas) => (
-                        <option key={kelas.id} value={kelas.id}>
-                          {kelas.name}
-                          {kelas.subject?.name
-                            ? ` — ${kelas.subject.name}`
-                            : ""}
+              <ProgramClassSelectors
+                programs={programOptions}
+                classes={classes}
+                enrollments={programEnrollments}
+                disabled={saving || Boolean(createdStudentId) || classesLoading}
+                onChange={(programId, classId) => {
+                  setProgramEnrollments((current) =>
+                    current.map((item) =>
+                      item.programId === programId
+                        ? { ...item, classId }
+                        : item,
+                    ),
+                  );
+                  setProgramError(null);
+                }}
+              />
+              {false && (
+                <div className="mt-4">
+                  {programEnrollments.some(
+                    (item) =>
+                      programOptions.find(
+                        (option) => option.id === item.programId,
+                      )?.learningModel === "CLASS_BASED",
+                  ) ? (
+                    <div>
+                      <label
+                        htmlFor="regular-class"
+                        className="mb-1.5 block text-xs font-medium text-gray-700"
+                      >
+                        Kelas Program{" "}
+                        <span className="text-gray-400">(opsional)</span>
+                      </label>
+                      <select
+                        id="regular-class"
+                        value={selectedClassId}
+                        onChange={(e) => {
+                          setSelectedClassId(e.target.value);
+                          const classProgram = programEnrollments.find(
+                            (item) =>
+                              programOptions.find(
+                                (option) => option.id === item.programId,
+                              )?.learningModel === "CLASS_BASED",
+                          );
+                          if (classProgram)
+                            setProgramEnrollments((current) =>
+                              current.map((item) =>
+                                item.programId === classProgram.programId
+                                  ? { ...item, classId: e.target.value || null }
+                                  : item,
+                              ),
+                            );
+                          setProgramError(null);
+                        }}
+                        disabled={
+                          saving || Boolean(createdStudentId) || classesLoading
+                        }
+                        className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-navy-500 focus:ring-2 focus:ring-navy-100 disabled:bg-gray-50 disabled:text-gray-500"
+                      >
+                        <option value="">
+                          {classesLoading
+                            ? "Memuat kelas..."
+                            : classes.length
+                              ? "Belum ditentukan"
+                              : "Belum ada kelas tersedia"}
                         </option>
-                      ))}
-                    </select>
-                    <p className="mt-1.5 text-xs text-gray-500">
-                      Siswa dapat ditempatkan ke kelas nanti melalui Edit Siswa.
+                        {classes.map((kelas) => (
+                          <option key={kelas.id} value={kelas.id}>
+                            {kelas.name}
+                            {kelas.subject?.name
+                              ? ` — ${kelas.subject.name}`
+                              : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-1.5 text-xs text-gray-500">
+                        Siswa dapat ditempatkan ke kelas nanti melalui Edit
+                        Siswa.
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="rounded-lg border border-navy-100 bg-navy-50 px-3 py-2 text-xs text-navy-800">
+                      Program individual tidak memerlukan kelas.
                     </p>
-                  </div>
-                ) : (
-                  <p className="rounded-lg border border-navy-100 bg-navy-50 px-3 py-2 text-xs text-navy-800">
-                    Paket privat awal akan diaktifkan dengan 24 pertemuan.
-                  </p>
-                )}
-                {programError && (
-                  <p role="alert" className="mt-2 text-xs text-red-700">
-                    {programError}
-                  </p>
-                )}
-              </div>
+                  )}
+                  {programError && (
+                    <p role="alert" className="mt-2 text-xs text-red-700">
+                      {programError}
+                    </p>
+                  )}
+                </div>
+              )}
             </section>
 
             {formError && (
@@ -908,17 +1128,7 @@ export default function AdminStudentsPage() {
                 disabled={saving}
                 className="h-10 rounded-lg bg-navy-900 px-4 text-sm font-medium text-white shadow-sm hover:bg-navy-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {saving
-                  ? createdStudentId
-                    ? program === "REGULAR"
-                      ? "Memasukkan ke Kelas..."
-                      : "Mengaktifkan Paket..."
-                    : "Menyimpan..."
-                  : createdStudentId
-                    ? program === "REGULAR"
-                      ? "Coba Lagi Masukkan Kelas"
-                      : "Coba Lagi Aktifkan Paket"
-                    : "Simpan Siswa"}
+                {saving ? "Menyimpan..." : "Simpan Siswa"}
               </button>
             </div>
           </form>
@@ -1113,6 +1323,14 @@ export default function AdminStudentsPage() {
               </h2>
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <label className="sm:col-span-2 text-xs font-medium text-gray-700">
+                  Kode Siswa
+                  <input
+                    value={editingStudent.studentCode}
+                    disabled
+                    className="mt-1.5 h-10 w-full rounded-lg border border-gray-300 bg-slate-50 px-3 text-sm font-normal text-gray-500"
+                  />
+                </label>
+                <label className="sm:col-span-2 text-xs font-medium text-gray-700">
                   Nama Siswa
                   <input
                     value={editForm.name}
@@ -1168,39 +1386,54 @@ export default function AdminStudentsPage() {
                 </label>
               </div>
             </section>
-            <section className="rounded-xl border border-gray-200 bg-white p-4">
-              <h2 className="text-sm font-semibold text-gray-900">
-                Penempatan Kelas Reguler
-              </h2>
-              <label className="mt-3 block text-xs font-medium text-gray-700">
-                Kelas Reguler <span className="text-gray-400">(opsional)</span>
-                <select
-                  value={editForm.classId}
-                  onChange={(e) =>
-                    setEditForm({ ...editForm, classId: e.target.value })
-                  }
-                  disabled={editSaving || classesLoading}
-                  className="mt-1.5 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-normal text-gray-900"
-                >
-                  <option value="">
-                    {classesLoading
-                      ? "Memuat kelas..."
-                      : classes.length
-                        ? "Belum ditentukan"
-                        : "Belum ada kelas tersedia"}
-                  </option>
-                  {classes.map((kelas) => (
-                    <option key={kelas.id} value={kelas.id}>
-                      {kelas.name}
+            <ProgramEnrollmentFields
+              programs={programOptions}
+              classes={classes}
+              enrollments={editProgramEnrollments}
+              disabled={editSaving}
+              classesLoading={classesLoading}
+              error={programError}
+              onChange={(enrollments) => {
+                setEditProgramEnrollments(enrollments);
+                setProgramError(null);
+              }}
+            />
+            {false && (
+              <section className="rounded-xl border border-gray-200 bg-white p-4">
+                <h2 className="text-sm font-semibold text-gray-900">
+                  Penempatan Kelas Reguler
+                </h2>
+                <label className="mt-3 block text-xs font-medium text-gray-700">
+                  Kelas Reguler{" "}
+                  <span className="text-gray-400">(opsional)</span>
+                  <select
+                    value={editForm.classId}
+                    onChange={(e) =>
+                      setEditForm({ ...editForm, classId: e.target.value })
+                    }
+                    disabled={editSaving || classesLoading}
+                    className="mt-1.5 h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm font-normal text-gray-900"
+                  >
+                    <option value="">
+                      {classesLoading
+                        ? "Memuat kelas..."
+                        : classes.length
+                          ? "Belum ditentukan"
+                          : "Belum ada kelas tersedia"}
                     </option>
-                  ))}
-                </select>
-              </label>
-              <p className="mt-2 text-xs text-gray-500">
-                Perubahan kelas berlaku untuk penempatan siswa saat ini dan
-                tidak mengubah riwayat sesi sebelumnya.
-              </p>
-            </section>
+                    {classes.map((kelas) => (
+                      <option key={kelas.id} value={kelas.id}>
+                        {kelas.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className="mt-2 text-xs text-gray-500">
+                  Perubahan kelas berlaku untuk penempatan siswa saat ini dan
+                  tidak mengubah riwayat sesi sebelumnya.
+                </p>
+              </section>
+            )}
             {editError && (
               <p
                 role="alert"

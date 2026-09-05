@@ -14,6 +14,7 @@ const router = Router();
 const classInputSchema = z.object({
   name: z.string().trim().min(2, "Nama minimal 2 karakter"),
   level: z.string().trim().optional(),
+  programId: z.string().uuid("Program wajib dipilih").optional(),
   studentIds: z
     .array(z.string().uuid("studentIds harus UUID valid"))
     .optional(),
@@ -36,8 +37,56 @@ async function assertActiveStudents(
     );
 }
 
+async function assertClassBasedProgram(
+  tx: Pick<typeof prisma, "program">,
+  programId: string,
+) {
+  const program = await tx.program.findFirst({
+    where: { id: programId, isActive: true, learningModel: "CLASS_BASED" },
+  });
+  if (!program)
+    throw new AppError("Pilih Program berbasis kelas yang aktif.", 400);
+  return program;
+}
+
+async function assignStudentsToProgramClass(
+  tx: Pick<typeof prisma, "studentProgram" | "classEnrollment">,
+  classId: string,
+  programId: string,
+  studentIds: string[],
+) {
+  if (studentIds.length) {
+    const eligible = await tx.studentProgram.findMany({
+      where: { studentId: { in: studentIds }, programId, status: "ACTIVE" },
+      select: { studentId: true },
+    });
+    if (eligible.length !== studentIds.length)
+      throw new AppError(
+        "Siswa harus memiliki enrollment aktif pada Program yang dipilih.",
+        400,
+      );
+    await tx.studentProgram.updateMany({
+      where: { studentId: { in: studentIds }, programId, status: "ACTIVE" },
+      data: { classId },
+    });
+    for (const studentId of studentIds) {
+      await tx.classEnrollment.upsert({
+        where: { classId_studentId: { classId, studentId } },
+        create: { classId, studentId, status: "ACTIVE" },
+        update: { status: "ACTIVE" },
+      });
+    }
+  }
+}
+
 const classListInclude = {
-  _count: { select: { enrollments: { where: { status: "ACTIVE" } } } },
+  _count: {
+    select: {
+      studentPrograms: {
+        where: { status: "ACTIVE", program: { learningModel: "CLASS_BASED" } },
+      },
+    },
+  },
 } as const;
 
 router.get("/", requireAuth, async (_req: Request, res: Response) => {
@@ -61,44 +110,37 @@ router.post(
   async (req: Request, res: Response) => {
     const parsed = classInputSchema.safeParse(req.body);
     if (!parsed.success)
-      return res
-        .status(400)
-        .json({
-          error: "Validation error",
-          details: parsed.error.flatten().fieldErrors,
-        });
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
     try {
       const studentIds = uniqueStudentIds(parsed.data.studentIds);
+      if (!parsed.data.programId)
+        throw new AppError(
+          "Program untuk penempatan siswa wajib dipilih.",
+          400,
+        );
       const kelas = await prisma.$transaction(async (tx) => {
         if (await tx.class.findUnique({ where: { name: parsed.data.name } }))
           throw new AppError("Nama kelas sudah digunakan", 409);
         await assertActiveStudents(tx, studentIds);
-        const program = await tx.program.findUnique({
-          where: { code: "REGULAR" },
-        });
-        if (!program)
-          throw new AppError(
-            "Konfigurasi program Reguler tidak ditemukan.",
-            500,
-          );
-        const quota = program.defaultMeetingQuota;
-        return tx.class.create({
+        await assertClassBasedProgram(tx, parsed.data.programId!);
+        const kelas = await tx.class.create({
           data: {
             name: parsed.data.name,
             level: parsed.data.level || null,
-            programId: program.id,
-            quotaTotal: quota,
-            quotaUsed: 0,
-            quotaRemaining: quota,
-            enrollments: studentIds.length
-              ? {
-                  create: studentIds.map((studentId) => ({
-                    studentId,
-                    status: "ACTIVE",
-                  })),
-                }
-              : undefined,
           },
+          include: classListInclude,
+        });
+        await assignStudentsToProgramClass(
+          tx,
+          kelas.id,
+          parsed.data.programId!,
+          studentIds,
+        );
+        return tx.class.findUniqueOrThrow({
+          where: { id: kelas.id },
           include: classListInclude,
         });
       });
@@ -118,17 +160,17 @@ router.get(
       const kelas = await prisma.class.findUnique({
         where: { id: req.params.id },
         include: {
-          program: { select: { id: true, name: true } },
-          enrollments: {
-            where: { status: "ACTIVE" },
-            include: {
-              student: { select: { id: true, name: true, status: true } },
-            },
-            orderBy: { enrollmentDate: "asc" },
+          program: {
+            select: { id: true, name: true, defaultMeetingQuota: true },
           },
           _count: {
             select: {
-              enrollments: { where: { status: "ACTIVE" } },
+              studentPrograms: {
+                where: {
+                  status: "ACTIVE",
+                  program: { learningModel: "CLASS_BASED" },
+                },
+              },
               schedules: true,
               sessions: true,
             },
@@ -136,7 +178,51 @@ router.get(
         },
       });
       if (!kelas) throw new AppError("Kelas tidak ditemukan", 404);
-      res.json({ success: true, data: kelas });
+      const roster = await prisma.studentProgram.findMany({
+        where: {
+          classId: kelas.id,
+          status: "ACTIVE",
+          ...(kelas.programId ? { programId: kelas.programId } : {}),
+        },
+        include: {
+          student: { select: { id: true, name: true, status: true } },
+        },
+        orderBy: { createdAt: "asc" },
+      });
+      const occurrences = await prisma.schedule.findMany({
+        where: {
+          classId: kelas.id,
+          isPattern: false,
+          ...(kelas.programId ? { programId: kelas.programId } : {}),
+        },
+        include: {
+          tutor: { select: { name: true } },
+          subject: { select: { name: true } },
+          sessions: { select: { status: true }, take: 1 },
+        },
+        orderBy: [{ occurrenceDate: "asc" }, { startTime: "asc" }],
+      });
+      const completedCount = kelas.programId
+        ? await prisma.teachingSession.count({
+            where: {
+              classId: kelas.id,
+              programId: kelas.programId,
+              status: "COMPLETED",
+            },
+          })
+        : 0;
+      const quotaTotal = kelas.program?.defaultMeetingQuota ?? kelas.quotaTotal;
+      res.json({
+        success: true,
+        data: {
+          ...kelas,
+          enrollments: roster,
+          occurrences,
+          quotaTotal,
+          quotaRemaining: Math.max(0, quotaTotal - completedCount),
+          _count: { ...kelas._count, studentPrograms: roster.length },
+        },
+      });
     } catch (err) {
       handleError(err, res);
     }
@@ -151,12 +237,10 @@ router.put(
   async (req: Request, res: Response) => {
     const parsed = updateSchema.safeParse(req.body);
     if (!parsed.success)
-      return res
-        .status(400)
-        .json({
-          error: "Validation error",
-          details: parsed.error.flatten().fieldErrors,
-        });
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
     try {
       const kelas = await prisma.$transaction(async (tx) => {
         const existing = await tx.class.findUnique({
@@ -175,36 +259,57 @@ router.put(
             : uniqueStudentIds(parsed.data.studentIds);
         if (studentIds !== undefined) {
           await assertActiveStudents(tx, studentIds);
-          const active = await tx.classEnrollment.findMany({
-            where: { classId: existing.id, status: "ACTIVE" },
-            select: { studentId: true },
-          });
-          const current = new Set(active.map((item) => item.studentId));
-          const selected = new Set(studentIds);
-          const removed = [...current].filter((id) => !selected.has(id));
-          const added = studentIds.filter((id) => !current.has(id));
-          if (removed.length)
-            await tx.classEnrollment.updateMany({
+          if (parsed.data.programId) {
+            await assertClassBasedProgram(tx, parsed.data.programId);
+            await tx.studentProgram.updateMany({
               where: {
                 classId: existing.id,
-                studentId: { in: removed },
+                programId: parsed.data.programId,
+                studentId: { notIn: studentIds },
                 status: "ACTIVE",
               },
-              data: { status: "INACTIVE" },
+              data: { classId: null },
             });
-          for (const studentId of added) {
-            const prior = await tx.classEnrollment.findUnique({
-              where: { classId_studentId: { classId: existing.id, studentId } },
+            await assignStudentsToProgramClass(
+              tx,
+              existing.id,
+              parsed.data.programId,
+              studentIds,
+            );
+          } else {
+            const active = await tx.classEnrollment.findMany({
+              where: { classId: existing.id, status: "ACTIVE" },
+              select: { studentId: true },
             });
-            if (prior)
-              await tx.classEnrollment.update({
-                where: { id: prior.id },
-                data: { status: "ACTIVE" },
+            const current = new Set(active.map((item) => item.studentId));
+            const selected = new Set(studentIds);
+            const removed = [...current].filter((id) => !selected.has(id));
+            const added = studentIds.filter((id) => !current.has(id));
+            if (removed.length)
+              await tx.classEnrollment.updateMany({
+                where: {
+                  classId: existing.id,
+                  studentId: { in: removed },
+                  status: "ACTIVE",
+                },
+                data: { status: "INACTIVE" },
               });
-            else
-              await tx.classEnrollment.create({
-                data: { classId: existing.id, studentId, status: "ACTIVE" },
+            for (const studentId of added) {
+              const prior = await tx.classEnrollment.findUnique({
+                where: {
+                  classId_studentId: { classId: existing.id, studentId },
+                },
               });
+              if (prior)
+                await tx.classEnrollment.update({
+                  where: { id: prior.id },
+                  data: { status: "ACTIVE" },
+                });
+              else
+                await tx.classEnrollment.create({
+                  data: { classId: existing.id, studentId, status: "ACTIVE" },
+                });
+            }
           }
         }
         return tx.class.update({
@@ -270,9 +375,10 @@ router.post(
         include: { program: true },
       });
       if (!existing) throw new AppError("Kelas tidak ditemukan", 404);
-      if (!existing.program)
-        throw new AppError("Konfigurasi program kelas tidak ditemukan.", 500);
-      const increment = existing.program.defaultMeetingQuota;
+      // A class is an academic master record. A legacy program link may still
+      // provide a custom quota, but new program-neutral classes use the
+      // established 24-meeting cycle without requiring a named Program.
+      const increment = existing.program?.defaultMeetingQuota ?? 24;
       const kelas = await prisma.class.update({
         where: { id: req.params.id },
         data: { quotaTotal: { increment }, quotaRemaining: { increment } },
@@ -330,19 +436,15 @@ router.post(
   async (req: Request, res: Response) => {
     const parsed = enrollSchema.safeParse(req.body);
     if (!parsed.success)
-      return res
-        .status(400)
-        .json({
-          error: "Validation error",
-          details: parsed.error.flatten().fieldErrors,
-        });
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
     try {
-      res
-        .status(201)
-        .json({
-          success: true,
-          data: await enrollStudent(req.params.classId, parsed.data.studentId),
-        });
+      res.status(201).json({
+        success: true,
+        data: await enrollStudent(req.params.classId, parsed.data.studentId),
+      });
     } catch (err) {
       handleError(err, res);
     }
@@ -372,12 +474,10 @@ router.patch(
   async (req: Request, res: Response) => {
     const parsed = enrollmentStatusSchema.safeParse(req.body);
     if (!parsed.success)
-      return res
-        .status(400)
-        .json({
-          error: "Validation error",
-          details: parsed.error.flatten().fieldErrors,
-        });
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
     try {
       res.json({
         success: true,

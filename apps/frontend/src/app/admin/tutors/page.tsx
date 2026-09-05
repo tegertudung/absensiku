@@ -11,6 +11,7 @@ type Subject = { id: string; name: string; isActive: boolean };
 type TutorSubject = { subject: Pick<Subject, "id" | "name"> };
 type Tutor = {
   id: string;
+  tutorCode: string;
   name: string;
   phone: string | null;
   title: string | null;
@@ -124,7 +125,9 @@ export default function AdminTutorsPage() {
   const visible = useMemo(
     () =>
       tutors.filter((t) =>
-        `${t.name} ${t.user.email}`.toLowerCase().includes(query.toLowerCase()),
+        `${t.tutorCode} ${t.name} ${t.user.email}`
+          .toLowerCase()
+          .includes(query.toLowerCase()),
       ),
     [tutors, query],
   );
@@ -162,7 +165,7 @@ export default function AdminTutorsPage() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Cari nama atau email tentor"
+                placeholder="Cari kode, nama, atau email tentor"
                 className="h-10 w-full rounded-lg border pl-9 pr-3 text-sm"
               />
             </div>
@@ -193,7 +196,12 @@ export default function AdminTutorsPage() {
                         key={t.id}
                         className="border-t border-gray-100 hover:bg-slate-50/70"
                       >
-                        <td className="p-3 font-medium">{t.name}</td>
+                        <td className="p-3 font-medium">
+                          <span className="block text-xs font-semibold text-navy-700">
+                            {t.tutorCode}
+                          </span>
+                          {t.name}
+                        </td>
                         <td>{t.user.email}</td>
                         <td>{t.phone || "-"}</td>
                         <td>

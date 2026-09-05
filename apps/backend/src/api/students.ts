@@ -30,6 +30,7 @@ const createSchema = z.object({
   school: z.string().trim().max(200).optional(),
   schoolClass: z.string().trim().max(100).optional(),
   classId: z.string().uuid().nullable().optional(),
+  programEnrollments: z.array(z.object({ programId: z.string().uuid(), classId: z.string().uuid().nullable().optional() })).optional(),
 });
 
 // POST /api/students
@@ -106,6 +107,7 @@ const updateSchema = z.object({
   nis: z.string().trim().max(100).optional(),
   school: z.string().trim().max(200).optional(),
   schoolClass: z.string().trim().max(100).optional(),
+  programEnrollments: z.array(z.object({ programId: z.string().uuid(), classId: z.string().uuid().nullable().optional() })).optional(),
 });
 
 // PUT /api/students/:id

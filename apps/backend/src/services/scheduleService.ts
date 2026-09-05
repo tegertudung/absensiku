@@ -179,6 +179,7 @@ async function assertAllowedOverlap(
 export async function createSchedule(data: {
   tutorId: string;
   sessionType: "REGULAR" | "PRIVATE";
+  programId: string;
   classId?: string;
   studentId?: string;
   subjectId?: string;
@@ -214,6 +215,16 @@ export async function createSchedule(data: {
   );
   await assertAllowedOverlap(conflicts, data.startTime);
 
+  const program = await prisma.program.findFirst({
+    where: { id: data.programId, isActive: true },
+  });
+  if (!program)
+    throw new AppError("Program tidak ditemukan atau tidak aktif", 404);
+  if (
+    (program.learningModel === "CLASS_BASED") !==
+    (data.sessionType === "REGULAR")
+  )
+    throw new AppError("Program tidak sesuai dengan jenis jadwal.", 400);
   const schedule = await prisma.schedule.create({
     data: {
       tutorId: data.tutorId,
@@ -221,7 +232,7 @@ export async function createSchedule(data: {
       classId: data.sessionType === "REGULAR" ? data.classId : undefined,
       studentId: data.sessionType === "PRIVATE" ? data.studentId : undefined,
       subjectId: data.subjectId,
-      programId: (await getProgramForSessionType(data.sessionType))?.id,
+      programId: program.id,
       dayOfWeek: data.dayOfWeek,
       startTime: data.startTime,
       endTime: data.endTime,
@@ -271,6 +282,9 @@ export async function listSchedules(filters: {
 }) {
   return prisma.schedule.findMany({
     where: {
+      // A tutor's personal calendar contains only explicitly assigned
+      // occurrences. Unassigned class occurrences are claimable via the
+      // direct-session lookup, never presented as that tutor's schedule.
       tutorId: filters.tutorId,
       sessionType: filters.sessionType as any,
       status: filters.status as any,
@@ -279,6 +293,14 @@ export async function listSchedules(filters: {
     },
     include: {
       tutor: { select: { name: true } },
+      program: { select: { id: true, name: true, learningModel: true } },
+      pattern: {
+        select: {
+          id: true,
+          programId: true,
+          program: { select: { id: true, name: true, learningModel: true } },
+        },
+      },
       // Quota included so Tentor Jadwal can show/disable "Mulai Kelas" once a
       // class or package runs out, same rule as the Beranda dashboard cards.
       class: { select: { name: true, quotaTotal: true, quotaRemaining: true } },
@@ -294,8 +316,35 @@ export async function listSchedules(filters: {
       },
       subject: { select: { name: true } },
     },
-    orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
+    orderBy: [
+      { occurrenceDate: "asc" },
+      { dayOfWeek: "asc" },
+      { startTime: "asc" },
+    ],
   });
+}
+
+/**
+ * One-time-safe compatibility repair for generated occurrences created before
+ * programId was copied from their parent pattern. Standalone schedules are
+ * deliberately excluded: only an explicit parent relation may supply a value.
+ */
+export async function repairLegacyOccurrencePrograms() {
+  const candidates = await prisma.schedule.findMany({
+    where: { programId: null, patternId: { not: null } },
+    select: { id: true, pattern: { select: { programId: true } } },
+  });
+  const repairs = candidates.filter((item) => item.pattern?.programId);
+  if (!repairs.length) return 0;
+  const result = await prisma.$transaction(
+    repairs.map((item) =>
+      prisma.schedule.updateMany({
+        where: { id: item.id, programId: null },
+        data: { programId: item.pattern!.programId! },
+      }),
+    ),
+  );
+  return result.reduce((total, item) => total + item.count, 0);
 }
 
 export async function getScheduleById(id: string) {
@@ -331,7 +380,7 @@ export async function updateSchedule(
 ) {
   const schedule = await prisma.schedule.findUnique({ where: { id } });
   if (!schedule) throw new AppError("Jadwal tidak ditemukan", 404);
-  if (!schedule.tutorId)
+  if (schedule.isPattern)
     throw new AppError(
       "Pola kelas harus diubah melalui pengaturan pola jadwal.",
       400,
@@ -348,17 +397,28 @@ export async function updateSchedule(
   const nextDay = data.dayOfWeek ?? schedule.dayOfWeek;
   const nextStart = data.startTime ?? schedule.startTime;
   const nextEnd = data.endTime ?? schedule.endTime;
-  const conflictsBeforeUpdate = await findScheduleConflicts(
-    schedule.tutorId,
-    nextDay,
-    nextStart,
-    nextEnd,
-    id,
-  );
-  await assertAllowedOverlap(conflictsBeforeUpdate, nextStart);
+  const conflictsBeforeUpdate = schedule.tutorId
+    ? await findScheduleConflicts(
+        schedule.tutorId,
+        nextDay,
+        nextStart,
+        nextEnd,
+        id,
+      )
+    : [];
+  if (schedule.tutorId)
+    await assertAllowedOverlap(conflictsBeforeUpdate, nextStart);
   // Same rule as createSchedule: switching to ONLINE drops any stale address.
   if (data.mode === "ONLINE") data.location = null;
-  const updated = await prisma.schedule.update({ where: { id }, data });
+  const updated = await prisma.schedule.update({
+    where: { id },
+    data: {
+      ...data,
+      ...(schedule.occurrenceDate && data.startDate
+        ? { occurrenceDate: data.startDate }
+        : {}),
+    },
+  });
 
   if (meta) {
     await logAudit({
@@ -382,7 +442,10 @@ export async function updateSchedule(
 
   let conflicts: ScheduleConflict[] = [];
 
-  if (data.dayOfWeek !== undefined || data.startTime || data.endTime) {
+  if (
+    schedule.tutorId &&
+    (data.dayOfWeek !== undefined || data.startTime || data.endTime)
+  ) {
     conflicts = await findScheduleConflicts(
       updated.tutorId!,
       updated.dayOfWeek,

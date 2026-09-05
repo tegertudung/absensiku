@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import api from "@/lib/api";
 import {
   IconBook,
@@ -18,12 +18,23 @@ import {
   IconX,
 } from "@/components/icons";
 type Option = { id: string; name: string };
+type Program = Option & {
+  learningModel: "CLASS_BASED" | "INDIVIDUAL";
+  isActive: boolean;
+};
 type StudentOption = Option & {
-  programs?: Array<{ type: string; quotaRemaining: number }>;
+  studentCode: string;
+  programEnrollments?: Array<{
+    programId: string;
+    status: string;
+    program: { learningModel: string; isActive: boolean };
+  }>;
 };
 type Form = {
+  scheduleId: string;
   sessionDate: string;
   sessionType: "REGULAR" | "PRIVATE";
+  programId: string;
   classId: string;
   studentIds: string[];
   subjectId: string;
@@ -57,8 +68,10 @@ const dur = (a: string, b: string) => {
     : null;
 };
 const initial = (): Form => ({
+  scheduleId: "",
   sessionDate: today(),
   sessionType: "REGULAR",
+  programId: "",
   classId: "",
   studentIds: [],
   subjectId: "",
@@ -72,7 +85,9 @@ const initial = (): Form => ({
 });
 export default function Page() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [classes, setClasses] = useState<Option[]>([]),
+    [programs, setPrograms] = useState<Program[]>([]),
     [students, setStudents] = useState<StudentOption[]>([]),
     [subjects, setSubjects] = useState<Option[]>([]),
     [form, setForm] = useState<Form>(initial),
@@ -81,8 +96,23 @@ export default function Page() {
     [error, setError] = useState<string | null>(null),
     [saved, setSaved] = useState(false);
   const set = (x: Partial<Form>) => setForm((p) => ({ ...p, ...x }));
-  const privateSession = form.sessionType === "PRIVATE",
+  useEffect(() => {
+    const scheduleId = searchParams.get("scheduleId");
+    const sessionDate = searchParams.get("sessionDate");
+    if (scheduleId) set({ scheduleId, ...(sessionDate ? { sessionDate } : {}) });
+  }, [searchParams]);
+  const selectedProgram = programs.find(
+    (program) => program.id === form.programId,
+  );
+  const privateSession = selectedProgram?.learningModel === "INDIVIDUAL",
     duration = dur(form.startTime, form.endTime);
+  const eligibleStudents = students.filter((student) =>
+    student.programEnrollments?.some(
+      (enrollment) =>
+        enrollment.status === "ACTIVE" &&
+        enrollment.programId === form.programId,
+    ),
+  );
   const selected = useMemo(
     () => ({
       kelas: classes.find((x) => x.id === form.classId),
@@ -99,6 +129,7 @@ export default function Page() {
     ],
   );
   const valid = !!(
+    selectedProgram &&
     form.subjectId &&
     (privateSession ? form.studentIds.length > 0 : form.classId) &&
     form.material.trim() &&
@@ -110,20 +141,17 @@ export default function Page() {
       api.get("/classes"),
       api.get("/students"),
       api.get("/subjects"),
+      api.get("/programs?active=true"),
     ])
-      .then(([c, s, m]) => {
+      .then(([c, s, m, p]) => {
         setClasses(c.data.data.filter((x: any) => x.status === "ACTIVE"));
         setStudents(
           s.data.data.filter(
-            (x: StudentOption & { status: string }) =>
-              x.status === "ACTIVE" &&
-              x.programs?.some(
-                (program) =>
-                  program.type === "PRIVATE" && program.quotaRemaining > 0,
-              ),
+            (x: StudentOption & { status: string }) => x.status === "ACTIVE",
           ),
         );
         setSubjects(m.data.data.filter((x: any) => x.isActive));
+        setPrograms(p.data.data);
       })
       .catch(() => setError("Pilihan form gagal dimuat."))
       .finally(() => setLoading(false));
@@ -135,6 +163,8 @@ export default function Page() {
     try {
       await api.post("/sessions/direct", {
         ...form,
+        scheduleId: form.scheduleId || undefined,
+        sessionType: privateSession ? "PRIVATE" : "REGULAR",
         classId: privateSession ? undefined : form.classId,
         studentIds: privateSession ? form.studentIds : undefined,
         location:
@@ -218,28 +248,21 @@ export default function Page() {
             {label(form.sessionDate)}
           </p>
         </Field>
-        <Field label="Jenis Sesi">
-          <div className="grid grid-cols-2 gap-2">
-            <Segment
-              active={!privateSession}
-              click={() => set({ sessionType: "REGULAR" })}
-              icon={<IconSchedule className="h-4 w-4" />}
-            >
-              Reguler
-            </Segment>
-            <Segment
-              active={privateSession}
-              click={() => set({ sessionType: "PRIVATE" })}
-              icon={<IconPrivate className="h-4 w-4" />}
-            >
-              Privat
-            </Segment>
-          </div>
+        <Field label="Program *">
+          <Choice
+            icon={<IconBook className="h-5 w-5" />}
+            value={form.programId}
+            items={programs}
+            placeholder={loading ? "Memuat Program..." : "Pilih Program"}
+            change={(programId) =>
+              set({ programId, classId: "", studentIds: [] })
+            }
+          />
         </Field>
         <Field label={privateSession ? "Siswa *" : "Kelas *"}>
           {privateSession ? (
             <PrivateStudentMultiSelect
-              students={students}
+              students={eligibleStudents}
               selectedIds={form.studentIds}
               disabled={loading}
               change={(studentIds) => set({ studentIds })}
@@ -426,11 +449,13 @@ function PrivateStudentMultiSelect(p: {
   const selectedStudents = p.students.filter((student) =>
     p.selectedIds.includes(student.id),
   );
-  const results = p.students.filter((student) =>
-    student.name
-      .toLocaleLowerCase("id-ID")
-      .includes(query.toLocaleLowerCase("id-ID")),
-  );
+  const results = p.students.filter((student) => {
+    const normalizedQuery = query.toLocaleLowerCase("id-ID");
+    return (
+      student.name.toLocaleLowerCase("id-ID").includes(normalizedQuery) ||
+      student.studentCode.toLocaleLowerCase("id-ID").includes(normalizedQuery)
+    );
+  });
   const summary = selectedStudents.map((student) => student.name).join(", ");
   const initials = (name: string) =>
     name
@@ -505,7 +530,7 @@ function PrivateStudentMultiSelect(p: {
                 autoFocus
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Cari nama siswa..."
+                placeholder="Cari nama atau kode SIS..."
                 className="min-h-11 w-full rounded-xl border border-gray-200 py-2 pl-10 pr-3 text-sm outline-none focus:border-navy-700 focus:ring-2 focus:ring-navy-100"
               />
             </label>
@@ -541,6 +566,9 @@ function PrivateStudentMultiSelect(p: {
                       </span>
                       <span className="flex-1 text-sm font-medium">
                         {student.name}
+                        <span className="mt-0.5 block text-xs font-normal text-gray-500">
+                          {student.studentCode}
+                        </span>
                       </span>
                       <span
                         aria-hidden="true"

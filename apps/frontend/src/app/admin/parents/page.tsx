@@ -13,16 +13,18 @@ import AdminTableActions from "@/components/TableActionMenu";
 interface StudentOption {
   id: string;
   name: string;
+  studentCode: string;
 }
 
 interface ParentRow {
   id: string;
+  parentCode: string;
   name: string;
   phone: string | null;
   user: { email: string; isActive: boolean; lastLogin: string | null };
   children: Array<{
     relationship: string | null;
-    student: { id: string; name: string };
+    student: { id: string; name: string; studentCode: string };
   }>;
 }
 
@@ -225,7 +227,7 @@ export default function AdminParentsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 bg-slate-50 text-left text-xs font-medium text-gray-500">
-                  <th className="px-4 py-3 font-medium">Nama</th>
+                  <th className="px-4 py-3 font-medium">Kode / Nama</th>
                   <th className="px-4 py-3 font-medium">Email</th>
                   <th className="px-4 py-3 font-medium">Anak</th>
                   <th className="px-4 py-3 font-medium">Status</th>
@@ -239,6 +241,9 @@ export default function AdminParentsPage() {
                     className="border-b border-gray-100 last:border-0 hover:bg-slate-50/70"
                   >
                     <td className="px-4 py-3 font-medium text-gray-900">
+                      <span className="block text-xs font-semibold text-navy-700">
+                        {p.parentCode}
+                      </span>
                       {p.name}
                     </td>
                     <td className="px-4 py-3 text-gray-600">{p.user.email}</td>
@@ -430,6 +435,12 @@ export default function AdminParentsPage() {
         <Modal title="Detail Orang Tua" onClose={() => setDetailParent(null)}>
           <div className="space-y-3 text-sm text-gray-700">
             <div>
+              <span className="text-gray-500">Kode Orang Tua</span>
+              <p className="font-medium text-navy-800">
+                {detailParent.parentCode}
+              </p>
+            </div>
+            <div>
               <span className="text-gray-500">Nama</span>
               <p className="font-medium text-gray-900">{detailParent.name}</p>
             </div>
@@ -464,6 +475,16 @@ export default function AdminParentsPage() {
                 {editError}
               </p>
             )}
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-gray-700">
+                Kode Orang Tua
+              </label>
+              <input
+                value={editingParent.parentCode}
+                disabled
+                className={inputClass}
+              />
+            </div>
             <div>
               <label className="mb-1.5 block text-xs font-medium text-gray-700">
                 Nama <span className="text-red-600">*</span>

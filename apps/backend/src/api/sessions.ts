@@ -200,7 +200,9 @@ const directSessionSchema = z
     endTime: z
       .string()
       .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Format jam selesai tidak valid"),
-    sessionType: z.enum(["REGULAR", "PRIVATE"]),
+    programId: z.string().uuid("Program wajib dipilih"),
+    scheduleId: z.string().uuid().optional(),
+    sessionType: z.enum(["REGULAR", "PRIVATE"]).optional(),
     classId: z.string().uuid().optional(),
     studentId: z.string().uuid().optional(),
     studentIds: z
@@ -216,20 +218,7 @@ const directSessionSchema = z
     score: z.number().min(0).max(100).nullable().optional(),
   })
   .superRefine((data, ctx) => {
-    if (data.sessionType === "REGULAR" && !data.classId)
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["classId"],
-        message: "Kelas wajib dipilih.",
-      });
-    if (data.sessionType === "PRIVATE" && !data.studentIds && !data.studentId)
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["studentIds"],
-        message: "Pilih minimal 1 siswa.",
-      });
     if (
-      data.sessionType === "PRIVATE" &&
       data.studentIds &&
       new Set(data.studentIds).size !== data.studentIds.length
     )
@@ -237,12 +226,6 @@ const directSessionSchema = z
         code: z.ZodIssueCode.custom,
         path: ["studentIds"],
         message: "Siswa tidak boleh dipilih lebih dari sekali.",
-      });
-    if (data.sessionType === "PRIVATE" && !data.progressNotes)
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["progressNotes"],
-        message: "Catatan perkembangan wajib diisi.",
       });
   });
 

@@ -1,5 +1,6 @@
-import type { Prisma, PrismaClient } from '@prisma/client';
-import { prisma as defaultPrisma } from '../utils/prisma';
+import type { Prisma, PrismaClient } from "@prisma/client";
+import { prisma as defaultPrisma } from "../utils/prisma";
+import { endOfBusinessDate, startOfBusinessDate } from "../utils/businessDate";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -9,21 +10,30 @@ type Db = PrismaClient | Prisma.TransactionClient;
  * session — never re-look-up the rate later when displaying historical data.
  */
 export async function getApplicableHonorRate(
-  sessionType: 'REGULAR' | 'PRIVATE',
+  programId: string,
   sessionDate: Date,
   db: Db = defaultPrisma,
-  programId?: string | null
 ) {
+  const sessionDayStart = startOfBusinessDate(sessionDate);
+  const sessionDayEnd = endOfBusinessDate(sessionDate);
+
   return db.honorRate.findFirst({
     where: {
-      sessionType,
-      status: 'ACTIVE',
-      effectiveFrom: { lte: sessionDate },
+      programId,
+      status: "ACTIVE",
+      // Rates are calendar-day rules. The day range keeps a rate entered as
+      // YYYY-MM-DD valid throughout that same session date, including records
+      // created before date-only parsing was normalized.
+      effectiveFrom: { lte: sessionDayEnd },
       AND: [
-        ...(programId ? [{ OR: [{ programId }, { programId: null }] }] : []),
-        { OR: [{ effectiveTo: null }, { effectiveTo: { gte: sessionDate } }] },
+        {
+          OR: [
+            { effectiveTo: null },
+            { effectiveTo: { gte: sessionDayStart } },
+          ],
+        },
       ],
     },
-    orderBy: [{ programId: 'desc' }, { effectiveFrom: 'desc' }],
+    orderBy: [{ programId: "desc" }, { effectiveFrom: "desc" }],
   });
 }
