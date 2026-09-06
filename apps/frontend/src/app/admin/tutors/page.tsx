@@ -23,7 +23,6 @@ const initial = {
   title: "",
   phone: "",
   email: "",
-  password: "",
   subjectIds: [] as string[],
 };
 export default function AdminTutorsPage() {
@@ -82,10 +81,8 @@ export default function AdminTutorsPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setFormError("");
-    if (!form.name.trim() || !form.email || form.password.length < 6)
-      return setFormError(
-        "Nama, email, dan password minimal 6 karakter wajib diisi.",
-      );
+    if (!form.name.trim() || !form.email)
+      return setFormError("Nama dan email wajib diisi.");
     if (!form.phone) return setFormError("Nomor telepon wajib diisi.");
     if (form.phone.length < 10 || form.phone.length > 13)
       return setFormError(
@@ -303,12 +300,11 @@ export default function AdminTutorsPage() {
                   : "Belum ada mata pelajaran dipilih."}
               </p>
             </div>
-            <Input
-              label="Password *"
-              value={form.password}
-              type="password"
-              change={(v) => setForm({ ...form, password: v })}
-            />
+            <p className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+              Password akun akan otomatis dibuat sebagai{" "}
+              <span className="font-semibold">123456</span>. Tentor akan
+              diminta mengganti password ini saat login pertama kali.
+            </p>
             {formError && <p className="text-sm text-red-600">{formError}</p>}
             <div className="flex justify-end gap-2">
               <button

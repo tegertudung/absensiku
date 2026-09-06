@@ -32,7 +32,7 @@ export default function LoginPage() {
       if (user.role === 'ADMIN') {
         router.push('/admin/dashboard');
       } else if (user.role === 'TENTOR') {
-        router.push('/tentor');
+        router.push(user.mustChangePassword ? '/tentor/profile?forced=1' : '/tentor');
       } else {
         router.push('/parent');
       }

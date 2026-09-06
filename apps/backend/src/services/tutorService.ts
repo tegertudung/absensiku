@@ -6,13 +6,17 @@ import { nextBusinessCode } from "../utils/businessCode";
 
 const SALT_ROUNDS = 10;
 
+// Every new tutor account starts with this password (client request: admin
+// no longer types one at creation time) — mustChangePassword forces the
+// tentor to set their own on first login rather than this staying in use.
+export const DEFAULT_TUTOR_PASSWORD = "123456";
+
 /**
  * Admin creates a tutor account: this is both a User (login credentials,
  * role=TENTOR) and a Tutor profile, created atomically.
  */
 export async function createTutor(data: {
   email: string;
-  password: string;
   name: string;
   phone?: string;
   hireDate?: Date;
@@ -27,7 +31,7 @@ export async function createTutor(data: {
   });
   if (existing) throw new AppError("Email sudah terdaftar", 409);
 
-  const passwordHash = await bcrypt.hash(data.password, SALT_ROUNDS);
+  const passwordHash = await bcrypt.hash(DEFAULT_TUTOR_PASSWORD, SALT_ROUNDS);
 
   return prisma.$transaction(async (tx) => {
     const subjectIds = [...new Set(data.subjectIds)];
@@ -41,7 +45,13 @@ export async function createTutor(data: {
         400,
       );
     const user = await tx.user.create({
-      data: { email: data.email, passwordHash, role: "TENTOR", isActive: true },
+      data: {
+        email: data.email,
+        passwordHash,
+        role: "TENTOR",
+        isActive: true,
+        mustChangePassword: true,
+      },
     });
 
     const tutor = await tx.tutor.create({
@@ -90,7 +100,12 @@ export async function resetTutorPassword(
 
     await tx.user.update({
       where: { id: tutor.user.id },
-      data: { passwordHash: await bcrypt.hash(newPassword, SALT_ROUNDS) },
+      // Admin set this value on the tentor's behalf, same as account
+      // creation — force them to set their own on next login.
+      data: {
+        passwordHash: await bcrypt.hash(newPassword, SALT_ROUNDS),
+        mustChangePassword: true,
+      },
     });
     await logAudit(
       {

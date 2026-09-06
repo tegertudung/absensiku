@@ -4,6 +4,7 @@ export interface AuthUser {
   id: string;
   email: string;
   role: 'ADMIN' | 'TENTOR' | 'PARENT';
+  mustChangePassword?: boolean;
 }
 
 interface AuthState {
@@ -11,6 +12,7 @@ interface AuthState {
   token: string | null;
   isHydrated: boolean;
   setAuth: (user: AuthUser, token: string) => void;
+  updateUser: (patch: Partial<AuthUser>) => void;
   logout: () => void;
   hydrate: () => void;
 }
@@ -24,6 +26,17 @@ export const useAuthStore = create<AuthState>((set) => ({
     localStorage.setItem('absensiku_token', token);
     localStorage.setItem('absensiku_user', JSON.stringify(user));
     set({ user, token });
+  },
+
+  // Patches the cached user in place (e.g. clearing mustChangePassword right
+  // after a successful change) without a fresh login round trip.
+  updateUser: (patch) => {
+    set((state) => {
+      if (!state.user) return state;
+      const user = { ...state.user, ...patch };
+      localStorage.setItem('absensiku_user', JSON.stringify(user));
+      return { user };
+    });
   },
 
   logout: () => {

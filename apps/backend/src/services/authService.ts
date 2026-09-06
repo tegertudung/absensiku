@@ -56,6 +56,7 @@ export async function login(email: string, password: string) {
       id: user.id,
       email: user.email,
       role: user.role,
+      mustChangePassword: user.mustChangePassword,
     },
   };
 }
@@ -109,7 +110,10 @@ export async function changePassword(userId: string, currentPassword: string, ne
   if (!isValid) throw new AuthError('Password saat ini salah', 400);
 
   const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
-  await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+  await prisma.user.update({
+    where: { id: userId },
+    data: { passwordHash, mustChangePassword: false },
+  });
 }
 
 export function generateToken(payload: JwtPayload): string {

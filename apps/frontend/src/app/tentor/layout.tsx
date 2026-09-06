@@ -27,6 +27,15 @@ export default function TentorLayout({ children }: { children: React.ReactNode }
   useEffect(() => { loadIdentity(); }, [loadIdentity]);
   const isPrivateScheduleForm = pathname === '/tentor/private/new';
 
+  // First login on a default/reset password: force the change-password
+  // screen before anything else in the app is reachable.
+  const forcedPasswordChange = Boolean(user?.mustChangePassword);
+  useEffect(() => {
+    if (forcedPasswordChange && pathname !== '/tentor/profile') {
+      router.replace('/tentor/profile?forced=1');
+    }
+  }, [forcedPasswordChange, pathname, router]);
+
   // Split nav items around the center FAB slot (Beranda, Jadwal | + | Rekap, Profil)
   const left = NAV_ITEMS.slice(0, 2);
   const right = NAV_ITEMS.slice(2);
@@ -56,9 +65,9 @@ export default function TentorLayout({ children }: { children: React.ReactNode }
           </div>
         </header>}
 
-        <main className={`flex-1 px-4 py-4 ${isPrivateScheduleForm ? '' : 'pb-24'}`}>{children}</main>
+        <main className={`flex-1 px-4 py-4 ${isPrivateScheduleForm || forcedPasswordChange ? '' : 'pb-24'}`}>{children}</main>
 
-        {!isPrivateScheduleForm && <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex items-stretch z-20">
+        {!isPrivateScheduleForm && !forcedPasswordChange && <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex items-stretch z-20">
           {left.map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href;

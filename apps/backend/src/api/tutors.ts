@@ -45,7 +45,6 @@ router.get(
 
 const createSchema = z.object({
   email: z.string().email("Email tidak valid"),
-  password: z.string().min(6, "Password minimal 6 karakter"),
   name: z.string().min(2, "Nama minimal 2 karakter"),
   phone: localPhoneSchema,
   hireDate: z.string().optional(),

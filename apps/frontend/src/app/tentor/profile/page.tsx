@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
 import api from "@/lib/api";
 import {
@@ -25,8 +25,11 @@ const roleLabel = (role?: string) =>
 
 export default function TentorProfilePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const forced = searchParams.get("forced") === "1";
   const logout = useAuthStore((state) => state.logout);
   const user = useAuthStore((state) => state.user);
+  const updateUser = useAuthStore((state) => state.updateUser);
   const [profile, setProfile] = useState<TutorProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -57,6 +60,10 @@ export default function TentorProfilePage() {
     loadProfile();
   }, [loadProfile]);
 
+  useEffect(() => {
+    if (forced) setShowPasswordForm(true);
+  }, [forced]);
+
   async function handleChangePassword() {
     setPwError(null);
     setPwSuccess(null);
@@ -70,9 +77,14 @@ export default function TentorProfilePage() {
         currentPassword: pwForm.currentPassword,
         newPassword: pwForm.newPassword,
       });
+      updateUser({ mustChangePassword: false });
       setPwSuccess("Password berhasil diubah.");
       setPwForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
-      setTimeout(() => setShowPasswordForm(false), 1200);
+      if (forced) {
+        setTimeout(() => router.replace("/tentor"), 1200);
+      } else {
+        setTimeout(() => setShowPasswordForm(false), 1200);
+      }
     } catch (error: any) {
       setPwError(error.response?.data?.message || "Gagal mengubah password.");
     } finally {
@@ -103,6 +115,16 @@ export default function TentorProfilePage() {
       <h1 className="text-[22px] font-bold tracking-tight text-navy-900">
         Profil Saya
       </h1>
+
+      {forced && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <p className="font-semibold">Ganti password Anda terlebih dahulu</p>
+          <p className="mt-1 text-xs leading-5">
+            Ini login pertama Anda dengan password default. Silakan buat
+            password baru sebelum melanjutkan.
+          </p>
+        </div>
+      )}
 
       {loadError ? (
         <section className="rounded-2xl border border-red-200 bg-white p-5 text-center">

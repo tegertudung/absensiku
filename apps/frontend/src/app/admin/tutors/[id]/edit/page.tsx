@@ -308,7 +308,8 @@ export default function EditTutorPage() {
               Reset Password Tentor
             </h2>
             <p className="mt-1 text-sm text-gray-600">
-              Atur password baru untuk {tutor.name}.
+              Atur password baru untuk {tutor.name}. Tentor akan diminta
+              mengganti password ini lagi saat login berikutnya.
             </p>
             <div className="mt-5 space-y-4">
               <FormField label="Password Baru *">
