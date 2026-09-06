@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import api from "@/lib/api";
+import api, { errorMessage } from "@/lib/api";
 import Modal from "@/components/Modal";
 import PageHeader from "@/components/PageHeader";
 import SectionCard from "@/components/SectionCard";
@@ -45,6 +45,8 @@ export default function AdminParentsPage() {
   const [editForm, setEditForm] = useState({ name: "", phone: "" });
   const [editError, setEditError] = useState<string | null>(null);
   const [studentQuery, setStudentQuery] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<ParentRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const [form, setForm] = useState({
     name: "",
@@ -120,19 +122,18 @@ export default function AdminParentsPage() {
     }
   }
 
-  async function toggleActive(parent: ParentRow) {
+  async function removeParent() {
+    if (!deleteTarget) return;
+    setDeleting(true);
     setActionError(null);
-    setBusyId(parent.id);
     try {
-      const action = parent.user.isActive ? "deactivate" : "activate";
-      await api.patch(`/parents/${parent.id}/${action}`);
+      await api.delete(`/parents/${deleteTarget.id}`);
+      setDeleteTarget(null);
       await load();
-    } catch (err: any) {
-      setActionError(
-        err.response?.data?.message || "Gagal mengubah status akun.",
-      );
+    } catch (err) {
+      setActionError(errorMessage(err, "Gagal menghapus akun orang tua."));
     } finally {
-      setBusyId(null);
+      setDeleting(false);
     }
   }
 
@@ -273,24 +274,12 @@ export default function AdminParentsPage() {
                       />
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <div className="inline-flex items-center gap-1 whitespace-nowrap">
-                        <AdminTableActions
-                          ariaLabel={`Aksi untuk ${p.name}`}
-                          onDetail={() => openDetail(p)}
-                          onEdit={() => openEdit(p)}
-                        />
-                        <button
-                          onClick={() => toggleActive(p)}
-                          disabled={busyId === p.id}
-                          className="rounded-md px-2 py-1 text-xs font-medium text-navy-700 hover:bg-navy-50 hover:text-navy-900 disabled:opacity-50"
-                        >
-                          {busyId === p.id
-                            ? "Memproses..."
-                            : p.user.isActive
-                              ? "Nonaktifkan"
-                              : "Aktifkan"}
-                        </button>
-                      </div>
+                      <AdminTableActions
+                        ariaLabel={`Aksi untuk ${p.name}`}
+                        onDetail={() => openDetail(p)}
+                        onEdit={() => openEdit(p)}
+                        onDelete={() => setDeleteTarget(p)}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -550,6 +539,43 @@ export default function AdminParentsPage() {
                 {saving ? "Menyimpan..." : "Simpan Perubahan"}
               </button>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {deleteTarget && (
+        <Modal
+          title="Hapus Akun Orang Tua?"
+          onClose={() => !deleting && setDeleteTarget(null)}
+        >
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+            <p className="text-sm leading-6 text-red-900">
+              Akun orang tua &quot;{deleteTarget.name}&quot; akan dihapus
+              secara permanen dari sistem.
+            </p>
+            <p className="mt-2 text-sm leading-6 text-red-800">
+              Relasi ke {deleteTarget.children.length} siswa yang terhubung
+              juga akan ikut terputus. Data siswa itu sendiri tidak terpengaruh.
+            </p>
+            <p className="mt-2 text-sm font-semibold text-red-900">
+              Tindakan ini tidak dapat dibatalkan.
+            </p>
+          </div>
+          <div className="mt-5 flex justify-end gap-2">
+            <button
+              onClick={() => setDeleteTarget(null)}
+              disabled={deleting}
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700"
+            >
+              Batal
+            </button>
+            <button
+              onClick={removeParent}
+              disabled={deleting}
+              className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60"
+            >
+              {deleting ? "Menghapus..." : "Hapus Permanen"}
+            </button>
           </div>
         </Modal>
       )}

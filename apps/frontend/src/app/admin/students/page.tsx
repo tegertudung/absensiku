@@ -12,6 +12,14 @@ import AdminTableActions from "@/components/TableActionMenu";
 import StatCard from "@/components/StatCard";
 import { IconClasses } from "@/components/icons";
 
+interface StudentProgramQuota {
+  type: "REGULAR" | "PRIVATE";
+  label: string;
+  quotaTotal: number;
+  quotaUsed: number;
+  quotaRemaining: number;
+}
+
 interface Student {
   id: string;
   studentCode: string;
@@ -25,6 +33,7 @@ interface Student {
   status: string;
   hasOperationalHistory: boolean;
   programEnrollments: ProgramEnrollment[];
+  programs: StudentProgramQuota[];
 }
 
 interface PrivatePackage {
@@ -731,6 +740,7 @@ export default function AdminStudentsPage() {
               <th className="px-5 py-3">Nama Siswa</th>
               <th className="px-4 py-3">Program</th>
               <th className="px-4 py-3">Kelas</th>
+              <th className="px-4 py-3">Sesi</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-5 py-3 text-right">Aksi</th>
             </tr>
@@ -809,6 +819,24 @@ export default function AdminStudentsPage() {
                           </p>
                         ))
                       : "-"}
+                  </td>
+                  <td className="px-4 py-3.5 text-xs">
+                    {s.programs.length === 0 ? (
+                      <span className="text-gray-400">-</span>
+                    ) : (
+                      s.programs.map((program, index) => (
+                        <p
+                          key={index}
+                          className={
+                            program.quotaRemaining === 0
+                              ? "font-medium text-red-700"
+                              : "font-medium text-gray-700"
+                          }
+                        >
+                          {program.quotaRemaining}/{program.quotaTotal}
+                        </p>
+                      ))
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={s.status} />

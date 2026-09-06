@@ -209,3 +209,30 @@ export async function unlinkChild(
 
   return getParentById(parentId);
 }
+
+/**
+ * Explicit admin-only hard delete (replaces the old Aktifkan/Nonaktifkan-only
+ * flow per client request — a parent account can now be removed outright).
+ * ParentStudent links cascade automatically via the schema's onDelete:
+ * Cascade on both Parent->ParentStudent and User->Parent, so deleting the
+ * User row is enough to remove the whole chain in one statement; audit
+ * logging still needs the parent's own data read first, before it's gone.
+ */
+export async function deleteParentPermanently(id: string, adminId: string) {
+  const parent = await getParentById(id);
+
+  await prisma.user.delete({ where: { id: parent.userId } });
+
+  await logAudit({
+    tableName: "parents",
+    recordId: id,
+    action: "DELETE",
+    oldValues: {
+      name: parent.name,
+      email: parent.user.email,
+      linkedStudentCount: parent.children.length,
+    },
+    changedBy: adminId,
+    reason: `Akun orang tua "${parent.name}" dihapus permanen beserta ${parent.children.length} relasi siswa.`,
+  });
+}

@@ -10,6 +10,7 @@ import {
   setParentActive,
   linkChild,
   unlinkChild,
+  deleteParentPermanently,
 } from '../services/parentService';
 
 const router = Router();
@@ -67,6 +68,17 @@ router.put('/:id', requireAuth, requireRole('ADMIN'), async (req: Request, res: 
   }
   try {
     res.json({ success: true, data: await updateParent(req.params.id, parsed.data) });
+  } catch (err) {
+    handleError(err, res);
+  }
+});
+
+// DELETE /api/parents/:id — hard delete (replaces relying solely on
+// Aktifkan/Nonaktifkan per client request).
+router.delete('/:id', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
+  try {
+    await deleteParentPermanently(req.params.id, req.user!.userId);
+    res.json({ success: true, data: { id: req.params.id } });
   } catch (err) {
     handleError(err, res);
   }
