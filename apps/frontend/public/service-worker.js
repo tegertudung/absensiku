@@ -24,6 +24,12 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
+  // Only http(s) requests are cacheable — a browser extension (password
+  // manager, ad blocker, React DevTools) can inject its own fetches that
+  // this listener still sees, tagged with a scheme like chrome-extension:,
+  // and Cache.put() throws on anything that isn't http/https.
+  if (!url.protocol.startsWith('http')) return;
+
   // API calls always need fresh data — never intercept them. If the network
   // is down the request just fails normally and the page's own error
   // handling (axios catch blocks) takes over.
