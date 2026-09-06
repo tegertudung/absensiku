@@ -14,7 +14,7 @@ import {
  * unambiguous (at most one open-ended ACTIVE rate per sessionType+subjectId at a time).
  */
 export async function createHonorRate(data: {
-  sessionType: "REGULAR" | "PRIVATE";
+  sessionType?: "REGULAR" | "PRIVATE";
   nominal: number;
   effectiveFrom: Date;
   subjectId?: string;
@@ -23,11 +23,14 @@ export async function createHonorRate(data: {
 }) {
   const effectiveFrom = startOfBusinessDate(data.effectiveFrom);
   return prisma.$transaction(async (tx) => {
+    if (!data.programId) throw new AppError("Program wajib dipilih.", 422);
+    const program = await tx.program.findFirst({ where: { id: data.programId, isActive: true } });
+    if (!program) throw new AppError("Program tidak ditemukan atau tidak aktif.", 422);
+    const sessionType = program.learningModel === "CLASS_BASED" ? "REGULAR" : "PRIVATE";
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`honor:${program.id}`}))`;
     const previous = await tx.honorRate.findFirst({
       where: {
-        sessionType: data.sessionType,
-        programId: data.programId ?? null,
-        subjectId: data.subjectId ?? null,
+        programId: program.id,
         status: "ACTIVE",
         effectiveTo: null,
       },
@@ -60,7 +63,7 @@ export async function createHonorRate(data: {
 
     return tx.honorRate.create({
       data: {
-        sessionType: data.sessionType,
+        sessionType,
         nominal: data.nominal,
         effectiveFrom,
         subjectId: data.subjectId,

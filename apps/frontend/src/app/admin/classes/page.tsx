@@ -39,6 +39,7 @@ type ClassItem = {
   level: string | null;
   quotaTotal: number;
   quotaRemaining: number;
+  programQuotas?: Array<{ programId: string; programName: string; quotaTotal: number; quotaRemaining: number }>;
   status: string;
   _count: { studentPrograms: number };
 };
@@ -452,7 +453,7 @@ export default function AdminClassesPage() {
                     <td
                       className={`px-4 py-3 font-medium ${item.quotaRemaining === 0 ? "text-red-700" : item.quotaRemaining <= 3 ? "text-amber-700" : "text-gray-700"}`}
                     >
-                      {item.quotaRemaining} / {item.quotaTotal}
+                      {item.programQuotas?.length ? item.programQuotas.map(q => <div key={q.programId}>{q.programName}: {q.quotaRemaining} / {q.quotaTotal}</div>) : "Belum ada Program"}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <AdminTableActions
@@ -681,7 +682,7 @@ export default function AdminClassesPage() {
                     <div className="rounded-lg border border-gray-200 p-3">
                       <p className="text-xs text-gray-500">Sisa Pertemuan</p>
                       <p className="mt-1 text-lg font-semibold text-gray-900">
-                        {detail.quotaRemaining} / {detail.quotaTotal}
+                        {detail.programQuotas?.length ? detail.programQuotas.map(q => <span className="block" key={q.programId}>{q.programName}: {q.quotaRemaining} / {q.quotaTotal}</span>) : "Belum ada Program"}
                       </p>
                     </div>
                   </div>

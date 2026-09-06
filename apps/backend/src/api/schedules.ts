@@ -18,6 +18,7 @@ import {
 } from "../services/scheduleService";
 
 const router = Router();
+router.use(requireAuth, requireRole("ADMIN", "TENTOR"));
 
 const timeString = z.string().regex(/^\d{2}:\d{2}$/, "Format jam harus HH:mm");
 const dateString = z
@@ -360,6 +361,7 @@ router.put(
       });
     try {
       const result = await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`patterns:${parsed.data.programId}:${req.params.classId}`}))`;
         const [kelas, program] = await Promise.all([
           tx.class.findFirst({
             where: { id: req.params.classId, status: "ACTIVE" },
@@ -416,7 +418,7 @@ router.put(
               where: { id: pattern.id },
               data: { status: "INACTIVE" },
             });
-          else await tx.schedule.delete({ where: { id: pattern.id } });
+          else await tx.schedule.update({ where: { id: pattern.id }, data: { status: "INACTIVE" } });
         }
         for (const slot of wanted.values()) {
           await tx.schedule.create({
@@ -444,7 +446,7 @@ router.put(
           orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
         });
         const existingOccurrences = await tx.schedule.findMany({
-          where: { patternId: { in: patterns.map((pattern) => pattern.id) } },
+          where: { classId: kelas.id, programId: program.id, isPattern: false, status: { not: "CANCELLED" } },
           select: {
             id: true,
             patternId: true,
@@ -457,7 +459,7 @@ router.put(
         const existingKeys = new Set(
           existingOccurrences.map(
             (row) =>
-              `${row.patternId}:${row.occurrenceDate ? localDateKey(row.occurrenceDate) : ""}:${String(row.startTime.getHours()).padStart(2, "0")}:${String(row.startTime.getMinutes()).padStart(2, "0")}`,
+              `${row.occurrenceDate ? localDateKey(row.occurrenceDate) : ""}:${String(row.startTime.getHours()).padStart(2, "0")}:${String(row.startTime.getMinutes()).padStart(2, "0")}`,
           ),
         );
         const slotsWithPattern: PersistedPatternSlot[] = patterns.map(
@@ -481,7 +483,7 @@ router.put(
             program.defaultMeetingQuota
           )
             break;
-          const key = `${candidate.slot.patternId}:${localDateKey(candidate.date)}:${candidate.slot.startTime}`;
+          const key = `${localDateKey(candidate.date)}:${candidate.slot.startTime}`;
           if (existingKeys.has(key)) continue;
           creates.push({
             patternId: candidate.slot.patternId,

@@ -261,7 +261,8 @@ export default function AdminSchedulesPage() {
         id: meeting.id,
         eventKind: "teaching-session" as const,
         scheduleId: meeting.scheduleId || undefined,
-        date: new Date(`${meeting.sessionDate.slice(0, 10)}T00:00:00`),
+        date: new Date(meeting.sessionDate),
+        programId: meeting.programId || undefined,
         start: time(meeting.startTime),
         end: time(meeting.endTime),
         sessionType: meeting.sessionType as "REGULAR" | "PRIVATE",
@@ -274,7 +275,7 @@ export default function AdminSchedulesPage() {
         location: meeting.location,
         classId: meeting.classId || undefined,
         patternId: meeting.scheduleId || undefined,
-        patternOccurrenceDate: meeting.patternOccurrenceDate?.slice(0, 10),
+        patternOccurrenceDate: meeting.patternOccurrenceDate ? iso(new Date(meeting.patternOccurrenceDate)) : undefined,
         calendarState: getCalendarState(meeting),
         meeting,
       }));
@@ -291,13 +292,13 @@ export default function AdminSchedulesPage() {
     const legacyItems: CalendarItem[] = legacy
       .filter(
         (row) =>
-          Boolean(row.occurrenceDate) ||
+          !row.isPattern && !meetings.some(meeting => meeting.scheduleId === row.id) && (Boolean(row.occurrenceDate) ||
           row.sessionType !== "REGULAR" ||
-          !patterns.some((pattern) => pattern.classId === row.classId),
+          !patterns.some((pattern) => pattern.classId === row.classId)),
       )
       .flatMap((row) => {
         if (row.occurrenceDate) {
-          const date = new Date(`${row.occurrenceDate.slice(0, 10)}T00:00:00`);
+          const date = new Date(row.occurrenceDate);
           if (date < week || date > weekEnd) return [];
           return [
             {
@@ -319,7 +320,7 @@ export default function AdminSchedulesPage() {
               programId: row.programId || undefined,
               patternId: row.patternId || undefined,
               incomplete: !row.tutor || !row.subject,
-              calendarState:
+              calendarState: row.status === "CANCELLED" ? "CANCELLED" :
                 !row.tutor || !row.subject ? "INCOMPLETE" : "WAITING_NOTE",
             },
           ];
@@ -356,7 +357,7 @@ export default function AdminSchedulesPage() {
     const existing = [...actual, ...compatibleLegacy];
     const incomplete: CalendarItem[] = patterns.flatMap(
       (pattern) =>
-        Array.from({ length: 7 }, (_, offset) => {
+        legacy.some(row => row.patternId === pattern.id) ? [] : Array.from({ length: 7 }, (_, offset) => {
           const date = addDays(week, offset);
           if (
             date.getDay() !== pattern.dayOfWeek ||
@@ -372,7 +373,7 @@ export default function AdminSchedulesPage() {
             legacy.some(
               (row) =>
                 row.patternId === pattern.id &&
-                row.occurrenceDate?.slice(0, 10) === iso(date) &&
+                row.occurrenceDate && iso(new Date(row.occurrenceDate)) === iso(date) &&
                 time(row.startTime) === time(pattern.startTime),
             )
           )
@@ -387,6 +388,7 @@ export default function AdminSchedulesPage() {
             label: pattern.class?.name || "Kelas",
             status: "INCOMPLETE",
             classId: pattern.classId,
+            programId: pattern.programId || undefined,
             patternId: pattern.id,
             patternOccurrenceDate: iso(date),
             incomplete: true,
@@ -397,7 +399,7 @@ export default function AdminSchedulesPage() {
     return [...existing, ...incomplete]
       .filter(
         (item) =>
-          (!filter.program || item.sessionType === filter.program) &&
+          (!filter.program || item.programId === filter.program) &&
           (!filter.tutor || item.tutorId === filter.tutor) &&
           (!filter.status || item.calendarState === filter.status),
       )
@@ -435,7 +437,7 @@ export default function AdminSchedulesPage() {
             subjectId: rawOccurrence.subjectId || "",
             tutorId: rawOccurrence.tutorId || "",
             patternId: rawOccurrence.patternId || "",
-            sessionDate: rawOccurrence.occurrenceDate?.slice(0, 10) || "",
+            sessionDate: rawOccurrence.occurrenceDate ? iso(new Date(rawOccurrence.occurrenceDate)) : "",
             startTime: time(rawOccurrence.startTime),
             endTime: time(rawOccurrence.endTime),
             mode: rawOccurrence.mode || "OFFLINE",
@@ -695,8 +697,7 @@ export default function AdminSchedulesPage() {
                 className="rounded-md border px-3 py-2 text-sm"
               >
                 <option value="">Semua program</option>
-                <option value="REGULAR">Reguler</option>
-                <option value="PRIVATE">Privat</option>
+                {programs.map(program => <option key={program.id} value={program.id}>{program.name}</option>)}
               </select>
               <select
                 value={filter.tutor}

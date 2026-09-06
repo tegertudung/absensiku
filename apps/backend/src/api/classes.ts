@@ -9,8 +9,10 @@ import {
   setEnrollmentStatus,
 } from "../services/enrollmentService";
 import { logAudit } from "../utils/auditLog";
+import { getClassQuotas } from "../services/classQuotaService";
 
 const router = Router();
+router.use(requireAuth, requireRole("ADMIN", "TENTOR"));
 const classInputSchema = z.object({
   name: z.string().trim().min(2, "Nama minimal 2 karakter"),
   level: z.string().trim().optional(),
@@ -91,12 +93,13 @@ const classListInclude = {
 
 router.get("/", requireAuth, async (_req: Request, res: Response) => {
   try {
+    const classes = await prisma.class.findMany({ include: classListInclude, orderBy: { name: "asc" } });
     res.json({
       success: true,
-      data: await prisma.class.findMany({
-        include: classListInclude,
-        orderBy: { name: "asc" },
-      }),
+      data: await Promise.all(classes.map(async kelas => {
+        const programQuotas = await getClassQuotas(kelas.id);
+        return { ...kelas, programQuotas, ...(programQuotas.length === 1 ? programQuotas[0] : {}) };
+      })),
     });
   } catch (err) {
     handleError(err, res);
@@ -182,10 +185,11 @@ router.get(
         where: {
           classId: kelas.id,
           status: "ACTIVE",
-          ...(kelas.programId ? { programId: kelas.programId } : {}),
+          program: { learningModel: "CLASS_BASED" },
         },
         include: {
           student: { select: { id: true, name: true, status: true } },
+          program: { select: { id: true, name: true } },
         },
         orderBy: { createdAt: "asc" },
       });
@@ -193,9 +197,9 @@ router.get(
         where: {
           classId: kelas.id,
           isPattern: false,
-          ...(kelas.programId ? { programId: kelas.programId } : {}),
         },
         include: {
+          program: { select: { id: true, name: true } },
           tutor: { select: { name: true } },
           subject: { select: { name: true } },
           sessions: { select: { status: true }, take: 1 },
@@ -212,6 +216,7 @@ router.get(
           })
         : 0;
       const quotaTotal = kelas.program?.defaultMeetingQuota ?? kelas.quotaTotal;
+      const programQuotas = await getClassQuotas(kelas.id);
       res.json({
         success: true,
         data: {
@@ -220,6 +225,8 @@ router.get(
           occurrences,
           quotaTotal,
           quotaRemaining: Math.max(0, quotaTotal - completedCount),
+          ...(programQuotas.length === 1 ? programQuotas[0] : {}),
+          programQuotas,
           _count: { ...kelas._count, studentPrograms: roster.length },
         },
       });

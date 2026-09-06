@@ -1,6 +1,8 @@
 import { prisma } from "../utils/prisma";
 import { AppError } from "../utils/errors";
 import { getSettings } from "./settingsService";
+import { getStudentById } from './studentService';
+import { getStudentProgress, learningPrograms } from './parentPortalService';
 
 /**
  * Laporan Progress Siswa — same data as parentPortalService.getChildProgress
@@ -10,111 +12,10 @@ import { getSettings } from "./settingsService";
  * student belongs to the requesting parent before calling this.
  */
 export async function buildStudentReport(studentId: string) {
-  const [
-    student,
-    settings,
-    privateSessions,
-    attendanceRecords,
-    enrollments,
-    packages,
-  ] = await Promise.all([
-    prisma.student.findUnique({ where: { id: studentId } }),
-    getSettings(),
-    prisma.teachingSession.findMany({
-      where: {
-        sessionType: "PRIVATE",
-        status: "COMPLETED",
-        OR: [{ studentId }, { attendanceRecords: { some: { studentId } } }],
-      },
-      include: {
-        tutor: { select: { name: true } },
-        subject: { select: { name: true } },
-      },
-      orderBy: { sessionDate: "desc" },
-      take: 50,
-    }),
-    prisma.attendanceRecord.findMany({
-      // Filtered to COMPLETED sessions here, not after fetching — see the
-      // matching note in parentPortalService.getChildProgress.
-      where: {
-        studentId,
-        session: { status: "COMPLETED", sessionType: "REGULAR" },
-      },
-      include: {
-        session: {
-          include: {
-            tutor: { select: { name: true } },
-            class: { select: { name: true } },
-            subject: { select: { name: true } },
-          },
-        },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 50,
-    }),
-    prisma.classEnrollment.findMany({
-      where: { studentId, status: "ACTIVE" },
-      include: {
-        class: {
-          select: {
-            name: true,
-            quotaTotal: true,
-            quotaUsed: true,
-            quotaRemaining: true,
-          },
-        },
-      },
-    }),
-    prisma.privatePackage.findMany({
-      where: { studentId, status: "ACTIVE" },
-      select: {
-        packageName: true,
-        quotaTotal: true,
-        quotaUsed: true,
-        quotaRemaining: true,
-      },
-    }),
+  const [student, settings, progress] = await Promise.all([
+    getStudentById(studentId), getSettings(), getStudentProgress(studentId),
   ]);
-  if (!student) throw new AppError("Siswa tidak ditemukan", 404);
-
-  const programs = [
-    ...enrollments.map((e) => ({
-      type: "REGULAR" as const,
-      label: e.class.name,
-      quotaTotal: e.class.quotaTotal,
-      quotaUsed: e.class.quotaUsed,
-      quotaRemaining: e.class.quotaRemaining,
-    })),
-    ...packages.map((p) => ({
-      type: "PRIVATE" as const,
-      label: p.packageName || "Paket Privat",
-      quotaTotal: p.quotaTotal,
-      quotaUsed: p.quotaUsed,
-      quotaRemaining: p.quotaRemaining,
-    })),
-  ];
-
-  return {
-    student,
-    settings,
-    programs,
-    privateSessions: privateSessions.map((s) => ({
-      sessionDate: s.sessionDate,
-      tutorName: s.tutor.name,
-      subjectName: s.subject?.name ?? null,
-      material: s.material,
-      progressNotes: s.progressNotes,
-      score: s.score,
-    })),
-    regularAttendance: attendanceRecords.map((a) => ({
-      sessionDate: a.session.sessionDate,
-      className: a.session.class?.name ?? null,
-      subjectName: a.session.subject?.name ?? null,
-      tutorName: a.session.tutor.name,
-      material: a.session.material,
-      attendanceStatus: a.status,
-    })),
-  };
+  return { student, settings, programs: learningPrograms(student), ...progress };
 }
 
 const ATTENDANCE_LABELS: Record<string, string> = {

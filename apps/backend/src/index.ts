@@ -32,14 +32,24 @@ import { SETTINGS_UPLOAD_ROOT } from './middleware/settingsUpload';
 const app = express();
 const PORT = process.env.PORT || 3001;
 const ENV = process.env.NODE_ENV || 'development';
+app.disable('x-powered-by');
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Cache-Control', 'no-store');
+  const json = res.json.bind(res);
+  res.json = (body: unknown) => json(res.statusCode >= 500 ? { error: 'Internal server error', message: 'Terjadi kesalahan internal. Silakan coba kembali.' } : body);
+  next();
+});
 
 // Middleware
 // FRONTEND_URL restricts CORS to the deployed frontend origin in production
 // (comma-separated for multiple, e.g. preview + prod Vercel URLs). Left
 // unset, cors() falls back to allowing any origin — fine for local dev,
 // where the frontend is always http://localhost:3000 anyway.
-const allowedOrigins = process.env.FRONTEND_URL?.split(',').map((o) => o.trim());
-app.use(cors(allowedOrigins ? { origin: allowedOrigins } : undefined));
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000,http://127.0.0.1:3000').split(',').map((o) => o.trim());
+app.use(cors({ origin: allowedOrigins }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use('/uploads/settings', express.static(SETTINGS_UPLOAD_ROOT));
@@ -86,12 +96,9 @@ app.use((req, res) => {
 });
 
 // Error handler
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Error:', err);
-  res.status(500).json({
-    error: 'Internal server error',
-    message: ENV === 'development' ? err.message : 'Something went wrong',
-  });
+app.use((err: { type?: string }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const status = err.type === 'entity.too.large' ? 413 : err.type === 'entity.parse.failed' ? 400 : 500;
+  res.status(status).json({ error: 'Request failed', message: status === 413 ? 'Ukuran request terlalu besar.' : status === 400 ? 'Format JSON tidak valid.' : 'Terjadi kesalahan internal.' });
 });
 
 // Start server

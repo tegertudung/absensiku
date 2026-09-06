@@ -13,11 +13,11 @@ import { parseBusinessDate } from "../utils/businessDate";
 const router = Router();
 
 const createSchema = z.object({
-  sessionType: z.enum(["REGULAR", "PRIVATE"]),
+  sessionType: z.enum(["REGULAR", "PRIVATE"]).optional(),
   nominal: z.number().positive("Nominal harus lebih dari 0"),
   effectiveFrom: z.string().min(10, "Format tanggal tidak valid (YYYY-MM-DD)"),
   subjectId: z.string().uuid("subjectId harus UUID valid").optional(),
-  programId: z.string().uuid("programId harus UUID valid").optional(),
+  programId: z.string().uuid("Program wajib dipilih"),
   notes: z.string().optional(),
 });
 

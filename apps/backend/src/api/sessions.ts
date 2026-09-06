@@ -21,8 +21,10 @@ import {
   getAttendanceForSession,
 } from "../services/attendanceService";
 import { lockOverdueSessions } from "../jobs/lockOverdueSessions";
+import { parseBusinessDate } from "../utils/businessDate";
 
 const router = Router();
+router.use(requireAuth, requireRole("ADMIN", "TENTOR"));
 const batchSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   sessionIds: z.array(z.string().uuid()).optional(),
@@ -56,7 +58,7 @@ router.post(
         success: true,
         data: await completeSessionsBatch({
           ...parsed.data,
-          date: new Date(parsed.data.date),
+          date: parseBusinessDate(parsed.data.date),
           tutorId,
           userId: req.user!.userId,
         }),
@@ -178,7 +180,7 @@ router.post(
 
       const session = await createSessionFromSchedule({
         scheduleId: parsed.data.scheduleId,
-        sessionDate: new Date(parsed.data.sessionDate),
+        sessionDate: parsed.data.sessionDate.length === 10 ? parseBusinessDate(parsed.data.sessionDate) : new Date(parsed.data.sessionDate),
         createdBy: req.user!.userId,
         actingTutorId,
       });
@@ -253,7 +255,7 @@ router.post(
         ...parsed.data,
         tutorId,
         userId: req.user!.userId,
-        sessionDate: new Date(`${parsed.data.sessionDate}T00:00:00`),
+        sessionDate: parseBusinessDate(parsed.data.sessionDate),
       });
       res.status(201).json({
         success: true,
@@ -603,6 +605,11 @@ router.get(
   requireAuth,
   async (req: Request, res: Response) => {
     try {
+      if (req.user!.role === "TENTOR") {
+        const tutorId = await resolveTutorIdForUser(req.user!.userId);
+        const owned = tutorId && await prisma.teachingSession.findFirst({ where: { id: req.params.id, tutorId }, select: { id: true } });
+        if (!owned) return res.status(403).json({ error: "Forbidden" });
+      }
       res.json({
         success: true,
         data: await getAttendanceForSession(req.params.id),

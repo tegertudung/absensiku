@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import { login, register, changePassword, AuthError } from '../services/authService';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requireRole } from '../middleware/auth';
 import { prisma } from '../utils/prisma';
 
 const router = Router();
@@ -37,9 +37,8 @@ router.post('/login', async (req: Request, res: Response) => {
 });
 
 // POST /api/auth/register
-// NOTE: Phase 1 — open registration for bootstrap. Lock this down to admin-only
-// (requireAuth + requireRole('ADMIN')) once the first admin account exists.
-router.post('/register', async (req: Request, res: Response) => {
+// Account creation is an administrative action; bootstrap is handled by setup.
+router.post('/register', requireAuth, requireRole('ADMIN'), async (req: Request, res: Response) => {
   const parsed = registerSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({

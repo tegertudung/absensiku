@@ -201,6 +201,8 @@ export default function AdminHonorRatesPage() {
             honorEffectiveFrom: form.honorEffectiveFrom,
           });
       setEditing(null);
+      setProgramOpen(false);
+      setForm(empty);
       setNotice("Program berhasil disimpan.");
       await load();
     } catch (e: any) {

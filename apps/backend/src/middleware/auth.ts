@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken, JwtPayload, AuthError } from '../services/authService';
+import { prisma } from '../utils/prisma';
 
 // Extend Express Request to carry the authenticated user
 declare global {
@@ -14,7 +15,7 @@ declare global {
  * Verifies the Bearer token and attaches the decoded payload to req.user.
  * Use on any route that requires a logged-in user.
  */
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -24,11 +25,21 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const token = authHeader.slice('Bearer '.length);
 
   try {
-    req.user = verifyToken(token);
+    const payload = verifyToken(token);
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      select: { id: true, email: true, role: true, isActive: true,
+        tutor: { select: { status: true, deletedAt: true } } },
+    });
+    if (!user || !user.isActive ||
+        (user.role === 'TENTOR' && (!user.tutor || user.tutor.deletedAt || user.tutor.status !== 'ACTIVE'))) {
+      return res.status(401).json({ error: 'Unauthorized', message: 'Akun tidak aktif atau tidak tersedia.' });
+    }
+    req.user = { userId: user.id, email: user.email, role: user.role as JwtPayload['role'] };
     next();
   } catch (err) {
     const status = err instanceof AuthError ? err.status : 401;
-    return res.status(status).json({ error: 'Unauthorized', message: (err as Error).message });
+    return res.status(status).json({ error: 'Unauthorized', message: 'Token tidak valid atau akun tidak tersedia.' });
   }
 }
 

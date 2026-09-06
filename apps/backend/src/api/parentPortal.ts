@@ -4,6 +4,7 @@ import { AppError, handleError } from '../utils/errors';
 import { resolveParentIdForUser, getParentById } from '../services/parentService';
 import { listChildrenForParent, getChildProgress } from '../services/parentPortalService';
 import { buildStudentReport, renderStudentReportPdf } from '../services/studentReportService';
+import { parseBusinessDate } from '../utils/businessDate';
 
 const router = Router();
 
@@ -12,11 +13,7 @@ function parseOptionalDate(value: unknown): Date | undefined {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new AppError('Tanggal tidak valid. Gunakan format YYYY-MM-DD.', 400);
   }
-  const date = new Date(`${value}T00:00:00.000Z`);
-  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
-    throw new AppError('Tanggal tidak valid. Gunakan format YYYY-MM-DD.', 400);
-  }
-  return date;
+  return parseBusinessDate(value);
 }
 
 // GET /api/parent/me — own profile (Profil page: name, phone, email)

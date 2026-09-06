@@ -15,6 +15,7 @@ import { parseUploadedFile } from "../middleware/fileUpload";
 import { previewStudentImport, commitStudentImport } from "../services/studentImportService";
 
 const router = Router();
+router.use(requireAuth, requireRole("ADMIN", "TENTOR"));
 
 const MAX_IMPORT_SIZE = 5 * 1024 * 1024;
 

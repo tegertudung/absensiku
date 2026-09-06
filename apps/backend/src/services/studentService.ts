@@ -2,9 +2,10 @@ import { prisma } from "../utils/prisma";
 import { AppError } from "../utils/errors";
 import { logAudit } from "../utils/auditLog";
 import { nextBusinessCode } from "../utils/businessCode";
+import type { Prisma } from "@prisma/client";
 
 function normalizeStudentName(name: string) {
-  return name.trim();
+  return name.trim().replace(/\s+/g, " ");
 }
 
 function normalizeStudentPhone(phone: string | undefined) {
@@ -12,21 +13,23 @@ function normalizeStudentPhone(phone: string | undefined) {
 }
 
 async function assertStudentIdentityAvailable(
-  tx: Pick<typeof prisma, "student">,
+  tx: Prisma.TransactionClient,
   name: string,
   phone: string | undefined,
   excludeStudentId?: string,
 ) {
   const normalizedPhone = normalizeStudentPhone(phone);
   if (!normalizedPhone) return;
-  const duplicate = await tx.student.findFirst({
+  const identityKey = `student:${normalizeStudentName(name).toLowerCase()}:${normalizedPhone}`;
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${identityKey}))`;
+  const candidates = await tx.student.findMany({
     where: {
-      name: { equals: normalizeStudentName(name), mode: "insensitive" },
       phone: normalizedPhone,
       ...(excludeStudentId ? { id: { not: excludeStudentId } } : {}),
     },
-    select: { id: true },
+    select: { id: true, name: true },
   });
+  const duplicate = candidates.some(s => normalizeStudentName(s.name).toLowerCase() === normalizeStudentName(name).toLowerCase());
   if (duplicate)
     throw new AppError(
       "Data siswa dengan nama dan nomor telepon tersebut sudah terdaftar.",
@@ -77,6 +80,8 @@ export async function createStudent(data: {
     const student = await tx.student.create({
       data: {
         ...profile,
+        name: normalizeStudentName(profile.name),
+        phone: normalizeStudentPhone(profile.phone),
         studentCode: await nextBusinessCode(tx, "student"),
         status: "ACTIVE",
       },
@@ -322,6 +327,7 @@ export async function getStudentById(id: string) {
     },
     include: {
       program: { select: { id: true, name: true } },
+      attendanceRecords: { select: { studentId: true } },
       class: { select: { id: true, name: true } },
       tutor: { select: { name: true } },
       subject: { select: { name: true } },
@@ -380,7 +386,7 @@ export async function getStudentById(id: string) {
         session.programId === enrollment.programId &&
         (enrollment.program.learningModel === "CLASS_BASED"
           ? session.classId === enrollment.classId
-          : session.studentId === id),
+          : session.studentId === id || session.attendanceRecords.some(record => record.studentId === id)),
     ),
   );
   return { ...student, programSummaries, sessionHistory };
@@ -495,7 +501,10 @@ export async function updateStudent(
       programEnrollments: _programEnrollments,
       ...profile
     } = data;
-    return tx.student.update({ where: { id }, data: profile });
+    return tx.student.update({ where: { id }, data: { ...profile,
+      ...(profile.name !== undefined ? { name: normalizeStudentName(profile.name) } : {}),
+      ...(profile.phone !== undefined ? { phone: normalizeStudentPhone(profile.phone) } : {}),
+    } });
   });
 }
 

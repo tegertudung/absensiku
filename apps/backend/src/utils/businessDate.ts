@@ -1,3 +1,4 @@
+import { AppError } from './errors';
 /**
  * Date-only values (such as an honor rate's effective date) represent a
  * calendar day in the Pioner Class business timezone, not a precise instant.
@@ -5,7 +6,7 @@
  */
 export function parseBusinessDate(value: string): Date {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    throw new Error("Format tanggal bisnis harus YYYY-MM-DD");
+    throw new AppError("Format tanggal bisnis harus YYYY-MM-DD", 400);
   }
 
   const [year, month, day] = value.split("-").map(Number);
@@ -15,7 +16,7 @@ export function parseBusinessDate(value: string): Date {
     date.getMonth() !== month - 1 ||
     date.getDate() !== day
   ) {
-    throw new Error("Tanggal bisnis tidak valid");
+    throw new AppError("Tanggal bisnis tidak valid", 400);
   }
   return date;
 }

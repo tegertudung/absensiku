@@ -1,9 +1,10 @@
 import { Router, Request, Response } from 'express';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requireRole } from '../middleware/auth';
 import { generateRecapExcel } from '../services/exportService';
 import { resolveTutorIdForUser } from '../services/sessionService';
 
 const router = Router();
+router.use(requireAuth, requireRole('ADMIN', 'TENTOR'));
 
 // GET /api/export/recap.xlsx?startDate=&endDate=&tutorId=&sessionType=&status=
 // Admin: can export all tutors or filter to one via ?tutorId=.
