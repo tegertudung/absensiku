@@ -38,9 +38,12 @@ body {
 .print-document-screen { min-height: 100vh; background: #f3f4f6; padding: 20px; }
 .letter-document { width: 100%; overflow: visible; }
 .letter-page { box-sizing: border-box; width: 210mm; min-height: 297mm; margin: 0 auto 20px; padding: 14mm 17mm 15mm; background: white; box-shadow: 0 2px 8px rgb(15 23 42 / 12%); font-size: 11.5pt; line-height: 1.45; overflow: hidden; }
-.letterhead { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.letter-logo { width: 58px; height: 58px; flex: 0 0 58px; object-fit: contain; }
-.letterhead-copy { min-width: 0; flex: 1; }
+/* Logo pinned to the left margin (absolute, out of flow) so the institution
+   copy can center on the full page width — the standard "kop surat" look —
+   rather than merely centering in the flex space left over next to the logo. */
+.letterhead { position: relative; min-width: 0; }
+.letter-logo { position: absolute; left: 0; top: 0; width: 58px; height: 58px; object-fit: contain; }
+.letterhead-copy { min-width: 0; text-align: center; }
 .letterhead-institution { margin: 0; color: #111; font-family: Arial, sans-serif; font-size: 12pt; font-weight: 700; letter-spacing: .2px; line-height: 1.1; }
 .letterhead h1 { margin: 1px 0 0; color: #174a91; font-family: Arial, sans-serif; font-size: 22pt; font-weight: 800; letter-spacing: .1px; line-height: 1; }
 .letterhead-address { margin: 5px 0 0; font-size: 9.5pt; line-height: 1.2; }
