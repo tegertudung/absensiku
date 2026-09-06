@@ -9,6 +9,7 @@ import PageHeader from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
 import { IconPlus, IconSearch } from "@/components/icons";
 import AdminTableActions from "@/components/TableActionMenu";
+import ImportModal from "@/components/ImportModal";
 import StatCard from "@/components/StatCard";
 import { IconClasses } from "@/components/icons";
 
@@ -294,6 +295,7 @@ export default function AdminStudentsPage() {
   const [programFilter, setProgramFilter] = useState("ALL");
   const [deleteTarget, setDeleteTarget] = useState<Student | null>(null);
   const [deleteAcknowledged, setDeleteAcknowledged] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [editForm, setEditForm] = useState({
     name: "",
@@ -659,13 +661,21 @@ export default function AdminStudentsPage() {
         title="Siswa"
         description="Kelola data siswa dan program belajar."
         action={
-          <button
-            onClick={openCreateForm}
-            className="inline-flex items-center gap-2 rounded-lg bg-navy-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-navy-800"
-          >
-            <IconPlus className="h-4 w-4" />
-            Tambah Siswa
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setImportOpen(true)}
+              className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Import Data
+            </button>
+            <button
+              onClick={openCreateForm}
+              className="inline-flex items-center gap-2 rounded-lg bg-navy-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-navy-800"
+            >
+              <IconPlus className="h-4 w-4" />
+              Tambah Siswa
+            </button>
+          </div>
         }
       />
 
@@ -1556,6 +1566,22 @@ export default function AdminStudentsPage() {
             </button>
           </div>
         </Modal>
+      )}
+      {importOpen && (
+        <ImportModal
+          title="Import Data Siswa"
+          instructions="File harus berformat .xlsx dengan kolom: Nama Siswa, Nomor Telepon, Nama Orang Tua/Wali, Telepon Orang Tua. Siswa yang diimpor belum terhubung ke program/kelas apa pun — atur lewat Edit Siswa setelahnya."
+          columns={[
+            { key: "name", label: "Nama Siswa" },
+            { key: "phone", label: "Nomor Telepon" },
+            { key: "guardianName", label: "Nama Orang Tua/Wali" },
+            { key: "guardianPhone", label: "Telepon Orang Tua" },
+          ]}
+          previewUrl="/students/import/preview"
+          commitUrl="/students/import"
+          onClose={() => setImportOpen(false)}
+          onImported={load}
+        />
       )}
     </div>
   );

@@ -11,8 +11,65 @@ import {
   deleteStudentPermanently,
 } from "../services/studentService";
 import { listEnrollmentsForStudent } from "../services/enrollmentService";
+import { parseUploadedFile } from "../middleware/fileUpload";
+import { previewStudentImport, commitStudentImport } from "../services/studentImportService";
 
 const router = Router();
+
+const MAX_IMPORT_SIZE = 5 * 1024 * 1024;
+
+// POST /api/students/import/preview — upload an .xlsx, get back every row
+// with its validation errors (empty = importable) for the admin to review.
+router.post(
+  "/import/preview",
+  requireAuth,
+  requireRole("ADMIN"),
+  parseUploadedFile({ fieldName: "file", maxSize: MAX_IMPORT_SIZE }),
+  async (req: Request, res: Response) => {
+    try {
+      const rows = await previewStudentImport(req.uploadedFile!.content);
+      res.json({ success: true, data: { rows } });
+    } catch (err) {
+      handleError(err, res);
+    }
+  },
+);
+
+const studentImportCommitSchema = z.object({
+  rows: z
+    .array(
+      z.object({
+        rowNumber: z.number(),
+        name: z.string(),
+        phone: z.string(),
+        guardianName: z.string(),
+        guardianPhone: z.string(),
+      }),
+    )
+    .min(1, "Tidak ada baris untuk diimpor."),
+});
+
+// POST /api/students/import — commits rows the admin reviewed (and possibly
+// hand-corrected) in the preview step; every row is re-validated here too.
+router.post(
+  "/import",
+  requireAuth,
+  requireRole("ADMIN"),
+  async (req: Request, res: Response) => {
+    const parsed = studentImportCommitSchema.safeParse(req.body);
+    if (!parsed.success)
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
+    try {
+      const result = await commitStudentImport(parsed.data.rows);
+      res.json({ success: true, data: result });
+    } catch (err) {
+      handleError(err, res);
+    }
+  },
+);
 
 const studentPhoneSchema = z
   .string({ required_error: "Nomor telepon wajib diisi" })

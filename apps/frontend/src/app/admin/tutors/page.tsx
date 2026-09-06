@@ -6,6 +6,7 @@ import PageHeader from "@/components/PageHeader";
 import SectionCard from "@/components/SectionCard";
 import EmptyState from "@/components/EmptyState";
 import AdminTableActions from "@/components/TableActionMenu";
+import ImportModal from "@/components/ImportModal";
 import { IconPlus, IconSearch } from "@/components/icons";
 type Subject = { id: string; name: string; isActive: boolean };
 type TutorSubject = { subject: Pick<Subject, "id" | "name"> };
@@ -39,7 +40,8 @@ export default function AdminTutorsPage() {
     [removing, setRemoving] = useState<Tutor | null>(null),
     [deleteError, setDeleteError] = useState(""),
     [deleting, setDeleting] = useState(false),
-    [deleteSuccess, setDeleteSuccess] = useState("");
+    [deleteSuccess, setDeleteSuccess] = useState(""),
+    [importOpen, setImportOpen] = useState(false);
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -135,13 +137,21 @@ export default function AdminTutorsPage() {
         title="Tentor"
         description="Kelola data dan informasi pengajar Pioneer Class."
         action={
-          <button
-            onClick={openCreate}
-            className="inline-flex h-10 items-center gap-2 rounded-lg bg-navy-900 px-4 text-sm font-medium text-white hover:bg-navy-800"
-          >
-            <IconPlus className="h-4 w-4" />
-            Tambah Tentor
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setImportOpen(true)}
+              className="inline-flex h-10 items-center gap-2 rounded-lg border border-gray-300 px-4 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Import Data
+            </button>
+            <button
+              onClick={openCreate}
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-navy-900 px-4 text-sm font-medium text-white hover:bg-navy-800"
+            >
+              <IconPlus className="h-4 w-4" />
+              Tambah Tentor
+            </button>
+          </div>
         }
       />
       <SectionCard
@@ -360,6 +370,23 @@ export default function AdminTutorsPage() {
             </div>
           </div>
         </Modal>
+      )}
+      {importOpen && (
+        <ImportModal
+          title="Import Data Tentor"
+          instructions='File harus berformat .xlsx dengan kolom: Nama, Gelar, No.Telepon, Email, Mata Pelajaran yang diajar. Untuk lebih dari satu mata pelajaran, pisahkan dengan koma (contoh: "Matematika, Fisika"). Setiap akun baru dibuat dengan password default 123456.'
+          columns={[
+            { key: "name", label: "Nama" },
+            { key: "title", label: "Gelar" },
+            { key: "phone", label: "No.Telepon" },
+            { key: "email", label: "Email" },
+            { key: "subjectNames", label: "Mata Pelajaran" },
+          ]}
+          previewUrl="/tutors/import/preview"
+          commitUrl="/tutors/import"
+          onClose={() => setImportOpen(false)}
+          onImported={load}
+        />
       )}
     </div>
   );

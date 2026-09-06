@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAuth, requireRole } from "../middleware/auth";
 import { handleError } from "../utils/errors";
 import { resolveTutorIdForUser } from "../services/sessionService";
+import { parseUploadedFile } from "../middleware/fileUpload";
 import {
   createTutor,
   listTutors,
@@ -13,8 +14,65 @@ import {
   getOwnTutorProfile,
   resetTutorPassword,
 } from "../services/tutorService";
+import { previewTutorImport, commitTutorImport } from "../services/tutorImportService";
 
 const router = Router();
+
+const MAX_IMPORT_SIZE = 5 * 1024 * 1024;
+
+// POST /api/tutors/import/preview — upload an .xlsx, get back every row
+// with its validation errors (empty = importable) for the admin to review.
+router.post(
+  "/import/preview",
+  requireAuth,
+  requireRole("ADMIN"),
+  parseUploadedFile({ fieldName: "file", maxSize: MAX_IMPORT_SIZE }),
+  async (req: Request, res: Response) => {
+    try {
+      const rows = await previewTutorImport(req.uploadedFile!.content);
+      res.json({ success: true, data: { rows } });
+    } catch (err) {
+      handleError(err, res);
+    }
+  },
+);
+
+const importCommitSchema = z.object({
+  rows: z
+    .array(
+      z.object({
+        rowNumber: z.number(),
+        name: z.string(),
+        title: z.string(),
+        phone: z.string(),
+        email: z.string(),
+        subjectNames: z.array(z.string()),
+      }),
+    )
+    .min(1, "Tidak ada baris untuk diimpor."),
+});
+
+// POST /api/tutors/import — commits rows the admin reviewed (and possibly
+// hand-corrected) in the preview step; every row is re-validated here too.
+router.post(
+  "/import",
+  requireAuth,
+  requireRole("ADMIN"),
+  async (req: Request, res: Response) => {
+    const parsed = importCommitSchema.safeParse(req.body);
+    if (!parsed.success)
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
+    try {
+      const result = await commitTutorImport(parsed.data.rows);
+      res.json({ success: true, data: result });
+    } catch (err) {
+      handleError(err, res);
+    }
+  },
+);
 
 const localPhoneSchema = z
   .string()
