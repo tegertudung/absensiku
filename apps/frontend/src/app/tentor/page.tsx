@@ -325,7 +325,7 @@ export default function TentorHomePage() {
             {scheduleTitle}
           </h2>
           <Link
-            href="/tentor/schedule"
+            href={`/tentor/schedule?date=${selectedDateKey}`}
             className="text-xs font-medium text-navy-700 hover:underline"
           >
             Lihat Semua

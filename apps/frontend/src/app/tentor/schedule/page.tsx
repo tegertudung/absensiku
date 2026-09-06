@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import api from "@/lib/api";
 import {
   IconChevronLeft,
@@ -387,9 +388,23 @@ function todayISODate() {
   return isoDate(new Date());
 }
 
+// Beranda's "Lihat Semua" link carries over whichever date was selected on
+// its own calendar (?date=YYYY-MM-DD) — without this the two pages tracked
+// the selected date independently, so picking a date on Beranda then
+// tapping through to Jadwal silently landed back on today.
+function parseDateParam(value: string | null): Date | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [y, m, d] = value.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 export default function TentorSchedulePage() {
+  const searchParams = useSearchParams();
   const [view, setView] = useState<"DAY" | "WEEK">("DAY");
-  const [anchorDate, setAnchorDate] = useState(() => new Date());
+  const [anchorDate, setAnchorDate] = useState(
+    () => parseDateParam(searchParams.get("date")) || new Date(),
+  );
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [loading, setLoading] = useState(true);
