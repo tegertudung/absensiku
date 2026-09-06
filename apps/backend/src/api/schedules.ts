@@ -1010,6 +1010,92 @@ router.put(
   },
 );
 
+const rescheduleOccurrenceSchema = z.object({
+  occurrenceDate: dateString,
+  startTime: timeString.optional(),
+  endTime: timeString.optional(),
+});
+
+// PUT /api/schedules/occurrences/:id/reschedule — moves one generated
+// occurrence to a different date (e.g. off a tanggal merah), optionally
+// with a new time. Only allowed while the occurrence is still blank
+// ("Belum dilengkapi": no tutor/subject assigned yet and no real
+// TeachingSession recorded against it) — once it's been completed or an
+// actual Pertemuan exists, that Pertemuan's own Edit/Batalkan flow is the
+// correct place to change it, not this planning-stage row.
+router.put(
+  "/occurrences/:id/reschedule",
+  requireAuth,
+  requireRole("ADMIN"),
+  async (req: Request, res: Response) => {
+    const parsed = rescheduleOccurrenceSchema.safeParse(req.body);
+    if (!parsed.success)
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
+    try {
+      const data = parsed.data;
+      const result = await prisma.$transaction(async (tx) => {
+        const occurrence = await tx.schedule.findFirst({
+          where: { id: req.params.id, isPattern: false, status: "ACTIVE" },
+          include: { sessions: { select: { id: true }, take: 1 } },
+        });
+        if (!occurrence)
+          throw new AppError("Occurrence pertemuan tidak ditemukan.", 404);
+        if (occurrence.tutorId || occurrence.subjectId)
+          throw new AppError(
+            "Pertemuan ini sudah dilengkapi tentor/mata pelajaran. Ubah lewat Edit Pertemuan, bukan lewat rencana pertemuan.",
+            409,
+          );
+        if (occurrence.sessions.length > 0)
+          throw new AppError(
+            "Pertemuan ini sudah tercatat sebagai sesi. Ubah lewat Edit/Batalkan Pertemuan.",
+            409,
+          );
+
+        const startTimeStr =
+          data.startTime ??
+          `${String(occurrence.startTime.getHours()).padStart(2, "0")}:${String(occurrence.startTime.getMinutes()).padStart(2, "0")}`;
+        const endTimeStr =
+          data.endTime ??
+          `${String(occurrence.endTime.getHours()).padStart(2, "0")}:${String(occurrence.endTime.getMinutes()).padStart(2, "0")}`;
+        if (startTimeStr >= endTimeStr)
+          throw new AppError("Jam selesai harus setelah jam mulai.", 400);
+
+        const newDate = new Date(`${data.occurrenceDate}T00:00:00`);
+        const duplicate = await tx.schedule.findFirst({
+          where: {
+            id: { not: occurrence.id },
+            patternId: occurrence.patternId,
+            occurrenceDate: newDate,
+            startTime: combineDateTime(data.occurrenceDate, startTimeStr),
+          },
+        });
+        if (duplicate)
+          throw new AppError(
+            "Sudah ada pertemuan lain dari pola ini pada tanggal dan jam tersebut.",
+            409,
+          );
+
+        return tx.schedule.update({
+          where: { id: occurrence.id },
+          data: {
+            occurrenceDate: newDate,
+            dayOfWeek: newDate.getDay(),
+            startDate: newDate,
+            startTime: combineDateTime(data.occurrenceDate, startTimeStr),
+            endTime: combineDateTime(data.occurrenceDate, endTimeStr),
+          },
+        });
+      });
+      res.json({ success: true, data: result });
+    } catch (err) {
+      handleError(err, res);
+    }
+  },
+);
+
 // GET /api/schedules/:id
 router.get("/:id", requireAuth, async (req: Request, res: Response) => {
   try {

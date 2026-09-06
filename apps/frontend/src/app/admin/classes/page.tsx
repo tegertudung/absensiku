@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import api from "@/lib/api";
+import api, { errorMessage } from "@/lib/api";
 import Modal from "@/components/Modal";
 import PageHeader from "@/components/PageHeader";
 import SectionCard from "@/components/SectionCard";
@@ -78,6 +78,9 @@ function occurrenceTime(value: string) {
   const date = new Date(value);
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
+function iso(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
 
 export default function AdminClassesPage() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -102,6 +105,16 @@ export default function AdminClassesPage() {
   const [detail, setDetail] = useState<ClassDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ClassItem | null>(null);
+  const [rescheduleTarget, setRescheduleTarget] = useState<Occurrence | null>(
+    null,
+  );
+  const [rescheduleForm, setRescheduleForm] = useState({
+    date: "",
+    startTime: "",
+    endTime: "",
+  });
+  const [rescheduleError, setRescheduleError] = useState("");
+  const [rescheduleSaving, setRescheduleSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -189,6 +202,40 @@ export default function AdminClassesPage() {
       setLoadError("Gagal memuat detail kelas.");
     } finally {
       setDetailLoading(false);
+    }
+  }
+
+  function openReschedule(occurrence: Occurrence) {
+    setRescheduleError("");
+    setRescheduleTarget(occurrence);
+    setRescheduleForm({
+      date: occurrence.occurrenceDate ? iso(new Date(occurrence.occurrenceDate)) : "",
+      startTime: occurrenceTime(occurrence.startTime),
+      endTime: occurrenceTime(occurrence.endTime),
+    });
+  }
+
+  async function submitReschedule(event: React.FormEvent) {
+    event.preventDefault();
+    if (!rescheduleTarget || !detail) return;
+    if (!rescheduleForm.date) return setRescheduleError("Tanggal wajib diisi.");
+    setRescheduleSaving(true);
+    setRescheduleError("");
+    try {
+      await api.put(`/schedules/occurrences/${rescheduleTarget.id}/reschedule`, {
+        occurrenceDate: rescheduleForm.date,
+        startTime: rescheduleForm.startTime,
+        endTime: rescheduleForm.endTime,
+      });
+      const response = await api.get(`/classes/${detail.id}`);
+      setDetail(response.data.data);
+      setRescheduleTarget(null);
+    } catch (error) {
+      setRescheduleError(
+        errorMessage(error, "Gagal mengubah tanggal pertemuan."),
+      );
+    } finally {
+      setRescheduleSaving(false);
     }
   }
   function toggleStudent(studentId: string) {
@@ -679,6 +726,7 @@ export default function AdminClassesPage() {
                               <th>Mapel</th>
                               <th>Tentor</th>
                               <th>Status</th>
+                              <th>Aksi</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -722,6 +770,16 @@ export default function AdminClassesPage() {
                                     }
                                   >
                                     {state}
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    {state === "Belum dilengkapi" && (
+                                      <button
+                                        onClick={() => openReschedule(item)}
+                                        className="text-xs font-medium text-navy-700 hover:underline"
+                                      >
+                                        Edit Tanggal
+                                      </button>
+                                    )}
                                   </td>
                                 </tr>
                               );
@@ -769,6 +827,91 @@ export default function AdminClassesPage() {
               {saving ? "Menghapus..." : "Hapus"}
             </button>
           </div>
+        </Modal>
+      )}
+
+      {rescheduleTarget && (
+        <Modal
+          title="Edit Tanggal Pertemuan"
+          onClose={() => !rescheduleSaving && setRescheduleTarget(null)}
+        >
+          <form onSubmit={submitReschedule} className="space-y-4">
+            <p className="text-sm text-gray-600">
+              Ubah tanggal atau jam pertemuan ke-
+              {rescheduleTarget.occurrenceSequence ?? ""} ini, misalnya karena
+              bertepatan dengan tanggal merah.
+            </p>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-700">
+                Tanggal
+              </label>
+              <input
+                type="date"
+                value={rescheduleForm.date}
+                onChange={(event) =>
+                  setRescheduleForm({
+                    ...rescheduleForm,
+                    date: event.target.value,
+                  })
+                }
+                className="h-10 w-full rounded-lg border border-gray-300 px-3 text-sm"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-700">
+                  Jam Mulai
+                </label>
+                <input
+                  type="time"
+                  value={rescheduleForm.startTime}
+                  onChange={(event) =>
+                    setRescheduleForm({
+                      ...rescheduleForm,
+                      startTime: event.target.value,
+                    })
+                  }
+                  className="h-10 w-full rounded-lg border border-gray-300 px-3 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-700">
+                  Jam Selesai
+                </label>
+                <input
+                  type="time"
+                  value={rescheduleForm.endTime}
+                  onChange={(event) =>
+                    setRescheduleForm({
+                      ...rescheduleForm,
+                      endTime: event.target.value,
+                    })
+                  }
+                  className="h-10 w-full rounded-lg border border-gray-300 px-3 text-sm"
+                />
+              </div>
+            </div>
+            {rescheduleError && (
+              <p className="text-sm text-red-600">{rescheduleError}</p>
+            )}
+            <div className="flex justify-end gap-2 border-t pt-4">
+              <button
+                type="button"
+                onClick={() => setRescheduleTarget(null)}
+                disabled={rescheduleSaving}
+                className="rounded-lg border px-4 py-2 text-sm"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={rescheduleSaving}
+                className="rounded-lg bg-navy-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+              >
+                {rescheduleSaving ? "Menyimpan..." : "Simpan"}
+              </button>
+            </div>
+          </form>
         </Modal>
       )}
     </div>
