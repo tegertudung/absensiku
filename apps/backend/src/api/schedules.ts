@@ -6,6 +6,7 @@ import { prisma } from "../utils/prisma";
 import { logAudit } from "../utils/auditLog";
 import { resolveTutorIdForUser } from "../services/sessionService";
 import { createNotification } from "../services/notificationService";
+import { getProgramForSessionType } from "../services/programService";
 import {
   createSchedule,
   listSchedules,
@@ -97,7 +98,11 @@ const createSchema = z.object({
   // still must supply it (enforced below, not by the schema).
   tutorId: z.string().uuid("tutorId harus UUID valid").optional(),
   sessionType: z.enum(["REGULAR", "PRIVATE"]),
-  programId: z.string().uuid("Program wajib diisi"),
+  // Optional: the TENTOR "Tambah Privat" form doesn't ask for a program (it
+  // only ever creates a PRIVATE schedule), so this falls back to whichever
+  // Program is registered for the session type — same resolution already
+  // used for direct meeting/session creation elsewhere in this file.
+  programId: z.string().uuid("Program tidak valid").optional(),
   classId: z.string().uuid().optional(),
   studentId: z.string().uuid().optional(),
   subjectId: z.string().uuid().optional(),
@@ -153,10 +158,20 @@ router.post("/", requireAuth, async (req: Request, res: Response) => {
   }
 
   try {
+    let programId = d.programId;
+    if (!programId) {
+      const program = await getProgramForSessionType(d.sessionType);
+      if (!program)
+        throw new AppError(
+          `Program untuk jenis jadwal ${d.sessionType} belum diatur. Hubungi admin.`,
+          404,
+        );
+      programId = program.id;
+    }
     const schedule = await createSchedule({
       tutorId: tutorId!,
       sessionType: d.sessionType,
-      programId: d.programId,
+      programId,
       classId: d.classId,
       studentId: d.studentId,
       subjectId: d.subjectId,
