@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import api from "@/lib/api";
 import { formatRupiah, formatDate } from "@/lib/format";
 import { StatusBadge, TypeBadge } from "@/components/StatusBadge";
@@ -28,9 +29,9 @@ interface SessionRow {
 }
 
 export default function TentorRecapPage() {
+  const router = useRouter();
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [downloadingSlip, setDownloadingSlip] = useState(false);
   const [period, setPeriod] = useState(() =>
     new Date().toISOString().slice(0, 7),
   );
@@ -45,7 +46,6 @@ export default function TentorRecapPage() {
     month: String(new Date().getMonth() + 1),
     year: String(new Date().getFullYear()),
   });
-  const [slipMessage, setSlipMessage] = useState("");
 
   function buildParams() {
     const params: Record<string, string> = {};
@@ -67,32 +67,10 @@ export default function TentorRecapPage() {
     load();
   }, [load]);
 
-  async function downloadSlip() {
-    setDownloadingSlip(true);
-    setSlipMessage("");
-    try {
-      const res = await api.get("/honor/slip.pdf", {
-        params: {
-          month: Number(slipPeriod.month),
-          year: Number(slipPeriod.year),
-        },
-        responseType: "blob",
-      });
-      const url = URL.createObjectURL(
-        new Blob([res.data], { type: "application/pdf" }),
-      );
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "slip-honor.pdf";
-      link.click();
-      URL.revokeObjectURL(url);
-    } catch (err: any) {
-      setSlipMessage(
-        err.response?.data?.message || "Gagal membuat Slip Honor.",
-      );
-    } finally {
-      setDownloadingSlip(false);
-    }
+  function openSlip() {
+    router.push(
+      `/tentor/recap/slip?month=${slipPeriod.month}&year=${slipPeriod.year}`,
+    );
   }
   function selectPeriod(value: string) {
     if (!value) return;
@@ -221,7 +199,7 @@ export default function TentorRecapPage() {
         <div className="mb-3">
           <p className="text-sm font-semibold text-navy-900">Slip Honor</p>
           <p className="mt-1 text-xs text-gray-500">
-            Unduh dokumen honor sesuai periode yang dipilih.
+            Lihat dan cetak dokumen honor sesuai periode yang dipilih.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2">
@@ -253,15 +231,11 @@ export default function TentorRecapPage() {
           />
         </div>
         <button
-          onClick={downloadSlip}
-          disabled={downloadingSlip}
-          className="mt-3 min-h-11 w-full rounded-xl bg-navy-900 text-sm font-semibold text-white disabled:opacity-60"
+          onClick={openSlip}
+          className="mt-3 min-h-11 w-full rounded-xl bg-navy-900 text-sm font-semibold text-white"
         >
-          {downloadingSlip ? "Menyiapkan slip..." : "Unduh Slip Honor"}
+          Lihat / Cetak Slip Honor
         </button>
-        {slipMessage && (
-          <p className="mt-2 text-xs text-red-600">{slipMessage}</p>
-        )}
       </section>
       <section className="space-y-2">
         <h2 className="text-base font-semibold text-navy-900">

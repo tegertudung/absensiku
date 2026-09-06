@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import api from "@/lib/api";
 import HonorSlipDocument, { HonorSlipData } from "@/components/HonorSlipDocument";
 
-export default function HonorSlipPreviewPage() {
-  const { tutorId } = useParams<{ tutorId: string }>();
+// Tentor's own version of admin/recap/slip/[tutorId] — same document, but
+// no tutorId in the URL: /honor/slip-summary resolves it server-side from
+// the logged-in TENTOR, exactly like the old /honor/slip.pdf endpoint did.
+export default function TentorHonorSlipPage() {
   const searchParams = useSearchParams();
   const preview = searchParams.get("preview") === "1";
   const month = Number(searchParams.get("month") || new Date().getMonth() + 1);
@@ -16,12 +18,12 @@ export default function HonorSlipPreviewPage() {
 
   useEffect(() => {
     api
-      .get("/honor/slip-summary", { params: { tutorId, month, year } })
+      .get("/honor/slip-summary", { params: { month, year } })
       .then((response) => setSlip(response.data.data))
       .catch((err) =>
         setError(err.response?.data?.message || "Gagal memuat Slip Honor."),
       );
-  }, [tutorId, month, year]);
+  }, [month, year]);
 
   useEffect(() => {
     if (slip && !preview) window.setTimeout(() => window.print(), 350);

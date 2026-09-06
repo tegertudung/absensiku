@@ -26,6 +26,10 @@ export default function TentorLayout({ children }: { children: React.ReactNode }
   const loadIdentity = useSystemIdentityStore((state) => state.load);
   useEffect(() => { loadIdentity(); }, [loadIdentity]);
   const isPrivateScheduleForm = pathname === '/tentor/private/new';
+  // Print-preview document (Slip Honor) — same reasoning as admin's honor
+  // slip / student letter print routes: no app chrome, or window.print()
+  // captures the header/bottom nav along with the document.
+  const isSlipPrint = pathname === '/tentor/recap/slip';
 
   // First login on a default/reset password: force the change-password
   // screen before anything else in the app is reachable.
@@ -43,7 +47,7 @@ export default function TentorLayout({ children }: { children: React.ReactNode }
   return (
     <RequireAuth role="TENTOR">
       <div className="min-h-screen bg-canvas flex flex-col">
-        {!isPrivateScheduleForm && <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between sticky top-0 z-10">
+        {!isPrivateScheduleForm && !isSlipPrint && <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between sticky top-0 z-10">
           <div className="flex items-center gap-2">
             <div className="relative flex h-7 w-7 items-center justify-center overflow-hidden rounded bg-navy-900">
               <img src="/logo.png" alt="Logo sistem" className="h-full w-full object-cover" />
@@ -65,9 +69,9 @@ export default function TentorLayout({ children }: { children: React.ReactNode }
           </div>
         </header>}
 
-        <main className={`flex-1 px-4 py-4 ${isPrivateScheduleForm || forcedPasswordChange ? '' : 'pb-24'}`}>{children}</main>
+        <main className={isSlipPrint ? '' : `flex-1 px-4 py-4 ${isPrivateScheduleForm || forcedPasswordChange ? '' : 'pb-24'}`}>{children}</main>
 
-        {!isPrivateScheduleForm && !forcedPasswordChange && <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex items-stretch z-20">
+        {!isPrivateScheduleForm && !isSlipPrint && !forcedPasswordChange && <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex items-stretch z-20">
           {left.map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href;

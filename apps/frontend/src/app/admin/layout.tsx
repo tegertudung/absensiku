@@ -133,11 +133,14 @@ export default function AdminLayout({
     PAGE_CONTEXT[pathname] ||
     (pathname.startsWith("/admin/students/") ? "Detail Siswa" : "Admin");
 
-  // A printable letter is a standalone document. Keeping it under the admin
-  // URL preserves authorization and links, but it must not inherit the visual
-  // application shell (sidebar, topbar, dashboard padding) in either screen
-  // preview or browser print.
+  // A printable document (Surat Siswa or Slip Honor) is standalone. Keeping
+  // it under the admin URL preserves authorization and links, but it must
+  // not inherit the visual application shell (sidebar, topbar, dashboard
+  // padding) in either screen preview or browser print — window.print()
+  // would otherwise capture the sidebar too.
   const isStudentLetterPrint = /^\/admin\/student-letters\/[^/]+\/print$/.test(pathname);
+  const isHonorSlipPrint = /^\/admin\/recap\/slip\/[^/]+$/.test(pathname);
+  const isPrintOnly = isStudentLetterPrint || isHonorSlipPrint;
 
   useEffect(() => {
     api
@@ -220,7 +223,7 @@ export default function AdminLayout({
     </div>
   );
 
-  if (isStudentLetterPrint) {
+  if (isPrintOnly) {
     return <RequireAuth role="ADMIN">{children}</RequireAuth>;
   }
 
