@@ -2,13 +2,27 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../utils/prisma';
 
-const JWT_SECRET = process.env.JWT_SECRET;
+/**
+ * JWT_SECRET wajib tersedia.
+ *
+ * Dibuat melalui function agar TypeScript mengetahui hasil akhirnya
+ * selalu bertipe string, bukan string | undefined.
+ */
+function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
 
-if (!JWT_SECRET) {
-  throw new Error('JWT_SECRET wajib dikonfigurasi.');
+  if (!secret) {
+    throw new Error('JWT_SECRET wajib dikonfigurasi.');
+  }
+
+  return secret;
 }
 
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
+const JWT_SECRET = getJwtSecret();
+
+const JWT_EXPIRES_IN: jwt.SignOptions['expiresIn'] =
+  (process.env.JWT_EXPIRES_IN as jwt.SignOptions['expiresIn']) || '7d';
+
 const SALT_ROUNDS = 10;
 
 export interface JwtPayload {
@@ -22,34 +36,54 @@ export class AuthError extends Error {
 
   constructor(message: string, status = 401) {
     super(message);
+    this.name = 'AuthError';
     this.status = status;
   }
 }
 
 /**
- * Login: verify email + password, return user + token.
+ * Login:
+ * - cari user berdasarkan email
+ * - verifikasi password
+ * - pastikan akun aktif
+ * - update lastLogin
+ * - generate JWT
  */
 export async function login(email: string, password: string) {
   const user = await prisma.user.findUnique({
-    where: { email },
+    where: {
+      email,
+    },
   });
 
   if (!user) {
     throw new AuthError('Email atau password salah', 401);
   }
 
-  const isValid = await bcrypt.compare(password, user.passwordHash);
+  const isValid = await bcrypt.compare(
+    password,
+    user.passwordHash,
+  );
 
   if (!isValid) {
     throw new AuthError('Email atau password salah', 401);
   }
 
+  /**
+   * Check dilakukan setelah password tervalidasi agar login dengan
+   * credential salah tetap memberikan response generik.
+   */
   if (!user.isActive) {
-    throw new AuthError('Akun tidak aktif. Hubungi admin.', 403);
+    throw new AuthError(
+      'Akun tidak aktif. Hubungi admin.',
+      403,
+    );
   }
 
   await prisma.user.update({
-    where: { id: user.id },
+    where: {
+      id: user.id,
+    },
     data: {
       lastLogin: new Date(),
     },
@@ -58,7 +92,7 @@ export async function login(email: string, password: string) {
   const token = generateToken({
     userId: user.id,
     email: user.email,
-    role: user.role as 'ADMIN' | 'TENTOR' | 'PARENT',
+    role: user.role as JwtPayload['role'],
   });
 
   return {
@@ -73,8 +107,11 @@ export async function login(email: string, password: string) {
 }
 
 /**
- * Register a new user.
- * Used by admin for creating tutor accounts / existing bootstrap flow.
+ * Register user baru.
+ *
+ * Saat ini mengikuti flow existing:
+ * Admin dapat membuat ADMIN / TENTOR sesuai caller/API yang
+ * sudah menggunakan service ini.
  */
 export async function register(
   email: string,
@@ -82,14 +119,22 @@ export async function register(
   role: 'ADMIN' | 'TENTOR',
 ) {
   const existing = await prisma.user.findUnique({
-    where: { email },
+    where: {
+      email,
+    },
   });
 
   if (existing) {
-    throw new AuthError('Email sudah terdaftar', 409);
+    throw new AuthError(
+      'Email sudah terdaftar',
+      409,
+    );
   }
 
-  const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+  const passwordHash = await bcrypt.hash(
+    password,
+    SALT_ROUNDS,
+  );
 
   const user = await prisma.user.create({
     data: {
@@ -103,7 +148,7 @@ export async function register(
   const token = generateToken({
     userId: user.id,
     email: user.email,
-    role: user.role as 'ADMIN' | 'TENTOR',
+    role: user.role as JwtPayload['role'],
   });
 
   return {
@@ -117,8 +162,9 @@ export async function register(
 }
 
 /**
- * Any logged-in role can change their own password,
- * provided the current password is correct.
+ * User yang sudah login dapat mengganti password sendiri.
+ *
+ * Password lama wajib benar.
  */
 export async function changePassword(
   userId: string,
@@ -126,11 +172,16 @@ export async function changePassword(
   newPassword: string,
 ) {
   const user = await prisma.user.findUnique({
-    where: { id: userId },
+    where: {
+      id: userId,
+    },
   });
 
   if (!user) {
-    throw new AuthError('Akun tidak ditemukan', 404);
+    throw new AuthError(
+      'Akun tidak ditemukan',
+      404,
+    );
   }
 
   const isValid = await bcrypt.compare(
@@ -138,11 +189,20 @@ export async function changePassword(
     user.passwordHash,
   );
 
-  // This is input validation, not an authentication-token failure.
-  // Returning 400 prevents the frontend global 401 interceptor
-  // from logging the user out when they mistype their current password.
+  /**
+   * Gunakan 400, bukan 401.
+   *
+   * 401 pada frontend diperlakukan sebagai authentication failure
+   * dan dapat membuat user otomatis logout.
+   *
+   * Password lama yang salah adalah validation error terhadap input
+   * user, bukan token yang invalid.
+   */
   if (!isValid) {
-    throw new AuthError('Password saat ini salah', 400);
+    throw new AuthError(
+      'Password saat ini salah',
+      400,
+    );
   }
 
   const passwordHash = await bcrypt.hash(
@@ -151,7 +211,9 @@ export async function changePassword(
   );
 
   await prisma.user.update({
-    where: { id: userId },
+    where: {
+      id: userId,
+    },
     data: {
       passwordHash,
       mustChangePassword: false,
@@ -161,33 +223,85 @@ export async function changePassword(
 
 /**
  * Generate JWT authentication token.
+ *
+ * Algoritma dikunci ke HS256.
  */
-export function generateToken(payload: JwtPayload): string {
-  return jwt.sign(payload, JWT_SECRET, {
-    algorithm: 'HS256',
-    expiresIn: JWT_EXPIRES_IN,
-  } as jwt.SignOptions);
+export function generateToken(
+  payload: JwtPayload,
+): string {
+  return jwt.sign(
+    payload,
+    JWT_SECRET,
+    {
+      algorithm: 'HS256',
+      expiresIn: JWT_EXPIRES_IN,
+    },
+  );
 }
 
 /**
- * Verify JWT token and validate required claims.
+ * Verify JWT dan validasi claim yang diperlukan aplikasi.
  */
-export function verifyToken(token: string): JwtPayload {
+export function verifyToken(
+  token: string,
+): JwtPayload {
   try {
-    const payload = jwt.verify(token, JWT_SECRET, {
-      algorithms: ['HS256'],
-    });
+    const decoded = jwt.verify(
+      token,
+      JWT_SECRET,
+      {
+        algorithms: ['HS256'],
+      },
+    );
 
+    /**
+     * jsonwebtoken dapat mengembalikan string atau object.
+     * Aplikasi membutuhkan JWT object dengan claim tertentu.
+     */
     if (
-      typeof payload === 'string' ||
-      typeof payload.userId !== 'string' ||
-      !/^[0-9a-f-]{36}$/i.test(payload.userId) ||
-      !['ADMIN', 'TENTOR', 'PARENT'].includes(payload.role)
+      typeof decoded !== 'object' ||
+      decoded === null
     ) {
-      throw new Error('Invalid claims');
+      throw new Error('Invalid token payload');
     }
 
-    return payload as JwtPayload;
+    const userId = decoded.userId;
+    const email = decoded.email;
+    const role = decoded.role;
+
+    if (
+      typeof userId !== 'string' ||
+      !/^[0-9a-f-]{36}$/i.test(userId)
+    ) {
+      throw new Error('Invalid userId claim');
+    }
+
+    if (
+      typeof email !== 'string' ||
+      email.trim().length === 0
+    ) {
+      throw new Error('Invalid email claim');
+    }
+
+    if (
+      role !== 'ADMIN' &&
+      role !== 'TENTOR' &&
+      role !== 'PARENT'
+    ) {
+      throw new Error('Invalid role claim');
+    }
+
+    /**
+     * Jangan cast seluruh decoded token menjadi JwtPayload,
+     * karena decoded juga membawa JWT metadata seperti iat/exp.
+     *
+     * Bangun object aplikasi secara eksplisit.
+     */
+    return {
+      userId,
+      email,
+      role,
+    };
   } catch {
     throw new AuthError(
       'Token tidak valid atau kedaluwarsa',
