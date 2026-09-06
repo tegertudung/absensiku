@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import api from "@/lib/api";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatTime } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 
 interface Program {
@@ -25,6 +25,8 @@ interface ProgramSummary {
 interface SessionRow {
   id: string;
   sessionDate: string;
+  startTime: string | null;
+  endTime: string | null;
   status: string;
   programId: string | null;
   program: { id: string; name: string } | null;
@@ -228,6 +230,13 @@ export default function AdminStudentDetailPage() {
                   >
                     <td className="px-4 py-3 text-gray-600">
                       {formatDate(session.sessionDate)}
+                      {session.startTime && (
+                        <span className="text-gray-400">
+                          {" "}
+                          · {formatTime(session.startTime)}
+                          {session.endTime ? `–${formatTime(session.endTime)}` : ""}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-gray-900">
                       {session.program?.name || "-"}

@@ -44,6 +44,7 @@ export default function AdminParentsPage() {
   const [editingParent, setEditingParent] = useState<ParentRow | null>(null);
   const [editForm, setEditForm] = useState({ name: "", phone: "" });
   const [editError, setEditError] = useState<string | null>(null);
+  const [studentQuery, setStudentQuery] = useState("");
 
   const [form, setForm] = useState({
     name: "",
@@ -78,6 +79,7 @@ export default function AdminParentsPage() {
   function resetForm() {
     setForm({ name: "", email: "", password: "", phone: "", studentIds: [] });
     setFormError(null);
+    setStudentQuery("");
   }
 
   function toggleStudent(id: string) {
@@ -387,13 +389,30 @@ export default function AdminParentsPage() {
                 Hubungkan ke Siswa (Anak){" "}
                 <span className="text-red-600">*</span>
               </label>
+              <input
+                value={studentQuery}
+                onChange={(event) => setStudentQuery(event.target.value)}
+                disabled={saving}
+                placeholder="Cari nama siswa..."
+                className={`${inputClass} mb-2`}
+              />
               <div className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-gray-300 p-2">
                 {students.length === 0 ? (
                   <p className="px-2 py-2 text-xs text-gray-400">
                     Belum ada data siswa.
                   </p>
+                ) : students.filter((s) =>
+                    s.name.toLowerCase().includes(studentQuery.trim().toLowerCase()),
+                  ).length === 0 ? (
+                  <p className="px-2 py-2 text-xs text-gray-400">
+                    Siswa tidak ditemukan.
+                  </p>
                 ) : (
-                  students.map((s) => (
+                  students
+                    .filter((s) =>
+                      s.name.toLowerCase().includes(studentQuery.trim().toLowerCase()),
+                    )
+                    .map((s) => (
                     <label
                       key={s.id}
                       className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50"

@@ -147,6 +147,12 @@ export default function EditTutorPage() {
 
   return (
     <div className="max-w-2xl space-y-5">
+      <button
+        onClick={() => router.push(`/admin/tutors/${id}`)}
+        className="text-xs text-blue-600"
+      >
+        ← Kembali ke Detail Tentor
+      </button>
       <PageHeader
         title="Edit Tentor"
         description="Perbarui profil dan mata pelajaran yang dapat diajar oleh tentor."

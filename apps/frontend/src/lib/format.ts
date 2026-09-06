@@ -11,6 +11,14 @@ export function formatDate(iso: string | Date): string {
   return new Date(iso).toLocaleDateString('id-ID');
 }
 
+export function formatTime(iso: string | Date | null | undefined): string {
+  if (!iso) return '';
+  return new Date(iso).toLocaleTimeString('id-ID', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export const SESSION_STATUS_LABELS: Record<string, string> = {
   SCHEDULED: 'Terjadwal',
   IN_PROGRESS: 'Dalam Proses',

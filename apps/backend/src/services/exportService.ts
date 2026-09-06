@@ -62,6 +62,18 @@ export async function generateRecapExcel(filters: {
   const headerRow = sheet.getRow(1);
   headerRow.font = { bold: true };
   headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE6F1FB' } };
+  headerRow.alignment = { vertical: 'middle', horizontal: 'center' };
+  headerRow.height = 20;
+  // Header stays visible while scrolling a long recap.
+  sheet.views = [{ state: 'frozen', ySplit: 1 }];
+
+  const THIN_BORDER = { style: 'thin' as const, color: { argb: 'FFD1D5DB' } };
+  function applyGridBorder(row: ExcelJS.Row) {
+    row.eachCell({ includeEmpty: true }, (cell) => {
+      cell.border = { top: THIN_BORDER, left: THIN_BORDER, bottom: THIN_BORDER, right: THIN_BORDER };
+    });
+  }
+  applyGridBorder(headerRow);
 
   let totalSessions = 0;
   let totalHonor = 0;
@@ -71,7 +83,7 @@ export async function generateRecapExcel(filters: {
     const isCompleted = s.status === 'COMPLETED';
     const honorValue = isCompleted ? toNumber(s.honorRateSnapshot) : 0;
 
-    sheet.addRow({
+    const row = sheet.addRow({
       tanggal: new Date(s.sessionDate).toLocaleDateString('id-ID'),
       hari: dayName,
       tentor: s.tutor?.name ?? '-',
@@ -82,6 +94,7 @@ export async function generateRecapExcel(filters: {
       tarif: honorValue,
       honor: honorValue,
     });
+    applyGridBorder(row);
 
     if (isCompleted) {
       totalSessions += 1;
@@ -91,10 +104,12 @@ export async function generateRecapExcel(filters: {
 
   sheet.addRow({});
   const totalRow = sheet.addRow({
-    tentor: `Total sesi selesai: ${totalSessions}`,
+    status: `Total sesi selesai: ${totalSessions}`,
     honor: totalHonor,
   });
   totalRow.font = { bold: true };
+  totalRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F4F6' } };
+  applyGridBorder(totalRow);
 
   sheet.getColumn('tarif').numFmt = '#,##0';
   sheet.getColumn('honor').numFmt = '#,##0';

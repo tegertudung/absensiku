@@ -77,6 +77,16 @@ const PACKAGE_STATUS_LABELS: Record<string, string> = {
   CANCELLED: "Dibatalkan",
 };
 
+// "Kelola Paket Privat" (add 24 meetings) only makes sense for a student
+// enrolled in an INDIVIDUAL (privat) program — a REGULAR/class-based
+// enrollment shares the class's own quota instead, so the action is hidden
+// entirely rather than left clickable-but-meaningless for those students.
+function isPrivateEligible(student: Student): boolean {
+  return student.programEnrollments.some(
+    (enrollment) => enrollment.program?.learningModel === "INDIVIDUAL",
+  );
+}
+
 function ProgramEnrollmentFields({
   programs,
   classes,
@@ -808,7 +818,10 @@ export default function AdminStudentsPage() {
                       ariaLabel={`Aksi ${s.name}`}
                       detailHref={`/admin/students/${s.id}`}
                       onEdit={() => openEdit(s)}
-                      onManage={() => openPackages(s)}
+                      manageLabel="Kelola Paket Privat"
+                      onManage={
+                        isPrivateEligible(s) ? () => openPackages(s) : undefined
+                      }
                       onDelete={() => {
                         setDeleteAcknowledged(false);
                         setDeleteTarget(s);
