@@ -5,6 +5,11 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import api from "@/lib/api";
 import {
+  tutorCombineScheduleTime as combineDateTime,
+  tutorDateKey as isoDate,
+  tutorScheduleOccursOn,
+} from "@/lib/tutorAgenda";
+import {
   IconChevronLeft,
   IconChevronRight,
   IconClock,
@@ -115,13 +120,6 @@ const TERMINAL_STATUSES = new Set([
   "CANCELLED_NOT_COUNTED",
 ]);
 
-function isoDate(d: Date) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 function addDays(d: Date, n: number) {
   const r = new Date(d);
   r.setDate(r.getDate() + n);
@@ -150,13 +148,6 @@ function timeOfDayMinutes(iso: string | null) {
 // startTime/endTime on a Schedule are a DateTime combined with an arbitrary
 // date — only the time-of-day matters for a recurring weekly slot, so we
 // re-combine it onto the agenda date being rendered.
-function combineDateTime(date: Date, timeIso: string) {
-  const t = new Date(timeIso);
-  const d = new Date(date);
-  d.setHours(t.getHours(), t.getMinutes(), 0, 0);
-  return d.toISOString();
-}
-
 function weekRangeLabel(monday: Date) {
   const sunday = addDays(monday, 6);
   const fmt = (d: Date, withYear: boolean) =>
@@ -179,14 +170,9 @@ function buildAgenda(
   const dateKey = isoDate(date);
   const weekday = date.getDay();
 
-  const daySchedules = schedules.filter((s) => {
-    if (s.occurrenceDate)
-      return isoDate(new Date(s.occurrenceDate)) === dateKey && s.status === "ACTIVE";
-    if (s.dayOfWeek !== weekday || s.status !== "ACTIVE") return false;
-    if (isoDate(new Date(s.startDate)) > dateKey) return false;
-    if (s.endDate && isoDate(new Date(s.endDate)) < dateKey) return false;
-    return true;
-  });
+  const daySchedules = schedules.filter((schedule) =>
+    tutorScheduleOccursOn(schedule, date),
+  );
   const sessionsForDate = sessions.filter(
     (s) => isoDate(new Date(s.sessionDate)) === dateKey,
   );
@@ -476,7 +462,9 @@ export default function TentorSchedulePage() {
     } catch (err: any) {
       const message = err.response?.data?.message || "Gagal memulai sesi.";
       if (message.includes("belum dilengkapi")) {
-        window.location.assign(`/tentor/sessions/direct?scheduleId=${scheduleId}&sessionDate=${dateKey}`);
+        window.location.assign(
+          `/tentor/sessions/direct?scheduleId=${scheduleId}&sessionDate=${dateKey}`,
+        );
         return;
       }
       setActionError(message);
@@ -973,48 +961,109 @@ function SessionDetailSheet({
         <div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-gray-200" />
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
-            <p className="text-base font-semibold text-navy-900">Detail Pertemuan</p>
+            <p className="text-base font-semibold text-navy-900">
+              Detail Pertemuan
+            </p>
             <p className="mt-0.5 text-sm text-gray-500">{item.title}</p>
           </div>
-          <button onClick={onClose} className="text-sm text-gray-500">Tutup</button>
+          <button onClick={onClose} className="text-sm text-gray-500">
+            Tutup
+          </button>
         </div>
         <dl className="space-y-3 text-sm">
-          <div className="flex justify-between gap-4"><dt className="text-gray-500">Kelas / Siswa</dt><dd className="text-right font-medium text-gray-900">{item.subtitle}</dd></div>
-          <div className="flex justify-between gap-4"><dt className="text-gray-500">Tanggal</dt><dd className="text-right font-medium text-gray-900">{new Intl.DateTimeFormat("id-ID", { dateStyle: "full" }).format(new Date(`${item.date.slice(0, 10)}T00:00:00`))}</dd></div>
-          <div className="flex justify-between gap-4"><dt className="text-gray-500">Waktu</dt><dd className="text-right font-medium text-gray-900">{formatTime(item.startTime)}–{formatTime(item.endTime)}</dd></div>
-          <div className="flex justify-between gap-4"><dt className="text-gray-500">Program</dt><dd className="text-right font-medium text-gray-900">{item.sessionType === "PRIVATE" ? "Privat" : "Reguler"}</dd></div>
-          <div className="flex justify-between gap-4"><dt className="text-gray-500">Mata Pelajaran</dt><dd className="text-right font-medium text-gray-900">{item.title}</dd></div>
-          <div className="flex justify-between gap-4"><dt className="text-gray-500">Lokasi</dt><dd className="text-right font-medium text-gray-900">{item.mode === "ONLINE" ? "Online" : item.location || "Offline"}</dd></div>
-          <div className="flex justify-between gap-4"><dt className="text-gray-500">Status</dt><dd className="text-right font-medium text-gray-900">{status}</dd></div>
+          <div className="flex justify-between gap-4">
+            <dt className="text-gray-500">Kelas / Siswa</dt>
+            <dd className="text-right font-medium text-gray-900">
+              {item.subtitle}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-4">
+            <dt className="text-gray-500">Tanggal</dt>
+            <dd className="text-right font-medium text-gray-900">
+              {new Intl.DateTimeFormat("id-ID", { dateStyle: "full" }).format(
+                new Date(`${item.date.slice(0, 10)}T00:00:00`),
+              )}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-4">
+            <dt className="text-gray-500">Waktu</dt>
+            <dd className="text-right font-medium text-gray-900">
+              {formatTime(item.startTime)}–{formatTime(item.endTime)}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-4">
+            <dt className="text-gray-500">Program</dt>
+            <dd className="text-right font-medium text-gray-900">
+              {item.sessionType === "PRIVATE" ? "Privat" : "Reguler"}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-4">
+            <dt className="text-gray-500">Mata Pelajaran</dt>
+            <dd className="text-right font-medium text-gray-900">
+              {item.title}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-4">
+            <dt className="text-gray-500">Lokasi</dt>
+            <dd className="text-right font-medium text-gray-900">
+              {item.mode === "ONLINE" ? "Online" : item.location || "Offline"}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-4">
+            <dt className="text-gray-500">Status</dt>
+            <dd className="text-right font-medium text-gray-900">{status}</dd>
+          </div>
         </dl>
         {item.conflict && (
           <>
-          <div className="mt-4 flex gap-2 rounded-xl bg-red-50 p-3 text-sm text-red-700">
-            <IconWarning className="h-4 w-4 shrink-0" />
-            Jadwal ini bertumpang tindih dengan pertemuan lain. Ajukan perubahan bila diperlukan.
-          </div>
-          <div className="mt-2 space-y-1.5 text-sm text-red-800">
-            {item.conflictsWith.map((session) => (
-              <p key={`${session.startTime}-${session.title}`}>
-                {formatTime(session.startTime)}-{formatTime(session.endTime)} · {session.subtitle} · {session.title} · {session.sessionType === "PRIVATE" ? "Privat" : "Reguler"}
-              </p>
-            ))}
-          </div>
+            <div className="mt-4 flex gap-2 rounded-xl bg-red-50 p-3 text-sm text-red-700">
+              <IconWarning className="h-4 w-4 shrink-0" />
+              Jadwal ini bertumpang tindih dengan pertemuan lain. Ajukan
+              perubahan bila diperlukan.
+            </div>
+            <div className="mt-2 space-y-1.5 text-sm text-red-800">
+              {item.conflictsWith.map((session) => (
+                <p key={`${session.startTime}-${session.title}`}>
+                  {formatTime(session.startTime)}-{formatTime(session.endTime)}{" "}
+                  · {session.subtitle} · {session.title} ·{" "}
+                  {session.sessionType === "PRIVATE" ? "Privat" : "Reguler"}
+                </p>
+              ))}
+            </div>
           </>
         )}
         {item.pendingRequest && (
           <div className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
             <p className="font-semibold">Pengajuan perubahan menunggu Admin</p>
-            <p className="mt-1">Usulan: {new Intl.DateTimeFormat("id-ID", { dateStyle: "medium" }).format(new Date(item.pendingRequest.proposedDate))}, {formatTime(item.pendingRequest.proposedStartTime)}–{formatTime(item.pendingRequest.proposedEndTime)}</p>
+            <p className="mt-1">
+              Usulan:{" "}
+              {new Intl.DateTimeFormat("id-ID", { dateStyle: "medium" }).format(
+                new Date(item.pendingRequest.proposedDate),
+              )}
+              , {formatTime(item.pendingRequest.proposedStartTime)}–
+              {formatTime(item.pendingRequest.proposedEndTime)}
+            </p>
             <p className="mt-1 text-xs">{item.pendingRequest.reason}</p>
           </div>
         )}
-        {isReadOnly && <p className="mt-4 text-sm text-gray-500">Sesi ini bersifat riwayat dan tidak dapat diubah.</p>}
+        {isReadOnly && (
+          <p className="mt-4 text-sm text-gray-500">
+            Sesi ini bersifat riwayat dan tidak dapat diubah.
+          </p>
+        )}
         {isReadOnly && item.notes && (
-          <div className="mt-3 text-sm"><p className="text-gray-500">Catatan</p><p className="mt-1 whitespace-pre-wrap text-gray-900">{item.notes}</p></div>
+          <div className="mt-3 text-sm">
+            <p className="text-gray-500">Catatan</p>
+            <p className="mt-1 whitespace-pre-wrap text-gray-900">
+              {item.notes}
+            </p>
+          </div>
         )}
         {mayRequest && (
-          <button onClick={onRequest} className="mt-5 w-full rounded-xl bg-navy-900 py-3 text-sm font-semibold text-white">
+          <button
+            onClick={onRequest}
+            className="mt-5 w-full rounded-xl bg-navy-900 py-3 text-sm font-semibold text-white"
+          >
             Ajukan Perubahan Jadwal
           </button>
         )}
@@ -1212,10 +1261,21 @@ function AgendaCard({
           </p>
 
           {item.conflict ? (
-            <p className="mt-2 flex items-center gap-1.5 text-xs text-red-600">
-              <IconWarning className="h-3.5 w-3.5 shrink-0" /> Jadwal tumpang
-              tindih
-            </p>
+            <>
+              <p className="mt-2 flex items-center gap-1.5 text-xs text-red-600">
+                <IconWarning className="h-3.5 w-3.5 shrink-0" /> Jadwal tumpang
+                tindih
+              </p>
+              {!TERMINAL_STATUSES.has(item.status) && (
+                <Link
+                  href={`/tentor/schedule/${item.scheduleId}/ajukan`}
+                  onClick={(event) => event.stopPropagation()}
+                  className="mt-3 inline-flex rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-medium text-red-700 transition hover:bg-red-50"
+                >
+                  Ubah Jam
+                </Link>
+              )}
+            </>
           ) : (
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
               <span className="flex items-center gap-1.5">

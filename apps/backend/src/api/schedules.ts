@@ -7,6 +7,7 @@ import { logAudit } from "../utils/auditLog";
 import { resolveTutorIdForUser } from "../services/sessionService";
 import { createNotification } from "../services/notificationService";
 import { getProgramForSessionType } from "../services/programService";
+import { assertEligiblePrivatePackage } from "../services/privatePackageService";
 import {
   createSchedule,
   listSchedules,
@@ -106,6 +107,7 @@ const createSchema = z.object({
   programId: z.string().uuid("Program tidak valid").optional(),
   classId: z.string().uuid().optional(),
   studentId: z.string().uuid().optional(),
+  privatePackageId: z.string().uuid().optional(),
   subjectId: z.string().uuid().optional(),
   dayOfWeek: z
     .number()
@@ -175,6 +177,7 @@ router.post("/", requireAuth, async (req: Request, res: Response) => {
       programId,
       classId: d.classId,
       studentId: d.studentId,
+      privatePackageId: d.privatePackageId,
       subjectId: d.subjectId,
       dayOfWeek: d.dayOfWeek,
       startTime: combineDateTime(d.startDate, d.startTime),
@@ -418,7 +421,11 @@ router.put(
               where: { id: pattern.id },
               data: { status: "INACTIVE" },
             });
-          else await tx.schedule.update({ where: { id: pattern.id }, data: { status: "INACTIVE" } });
+          else
+            await tx.schedule.update({
+              where: { id: pattern.id },
+              data: { status: "INACTIVE" },
+            });
         }
         for (const slot of wanted.values()) {
           await tx.schedule.create({
@@ -446,7 +453,12 @@ router.put(
           orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
         });
         const existingOccurrences = await tx.schedule.findMany({
-          where: { classId: kelas.id, programId: program.id, isPattern: false, status: { not: "CANCELLED" } },
+          where: {
+            classId: kelas.id,
+            programId: program.id,
+            isPattern: false,
+            status: { not: "CANCELLED" },
+          },
           select: {
             id: true,
             patternId: true,
@@ -528,6 +540,7 @@ const meetingSchema = z
     sessionType: z.enum(["REGULAR", "PRIVATE"]),
     classId: z.string().uuid().optional(),
     studentId: z.string().uuid().optional(),
+    privatePackageId: z.string().uuid().optional(),
     tutorId: z.string().uuid(),
     subjectId: z.string().uuid(),
     sessionDate: dateString,
@@ -556,6 +569,12 @@ const meetingSchema = z
         code: z.ZodIssueCode.custom,
         path: ["studentId"],
         message: "Siswa wajib dipilih.",
+      });
+    if (data.sessionType === "PRIVATE" && !data.privatePackageId)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["privatePackageId"],
+        message: "Paket Privat wajib dipilih.",
       });
   });
 
@@ -676,6 +695,16 @@ router.post(
           }))
         )
           throw new AppError("Siswa tidak ditemukan atau tidak aktif.", 404);
+        if (data.sessionType === "PRIVATE") {
+          await assertEligiblePrivatePackage(
+            {
+              studentId: data.studentId!,
+              programId: program.id,
+              privatePackageId: data.privatePackageId!,
+            },
+            tx,
+          );
+        }
         let patternOccurrenceDate: Date | null = null;
         if (data.patternId || data.patternOccurrenceDate) {
           if (
@@ -741,6 +770,8 @@ router.post(
             endTime: combineDateTime(data.sessionDate, data.endTime),
             classId: data.sessionType === "REGULAR" ? data.classId : null,
             studentId: data.sessionType === "PRIVATE" ? data.studentId : null,
+            privatePackageId:
+              data.sessionType === "PRIVATE" ? data.privatePackageId : null,
             subjectId: data.subjectId,
             programId: program?.id,
             mode: data.mode,
@@ -775,6 +806,7 @@ const updateMeetingSchema = z
     programId: z.string().uuid("Program wajib dipilih"),
     tutorId: z.string().uuid(),
     subjectId: z.string().uuid(),
+    privatePackageId: z.string().uuid().optional(),
     sessionDate: dateString,
     startTime: timeString,
     endTime: timeString,
@@ -852,12 +884,30 @@ router.put(
         (current.sessionType === "REGULAR")
       )
         throw new AppError("Program tidak sesuai dengan jenis pertemuan.", 400);
+      if (current.sessionType === "PRIVATE") {
+        const privatePackageId =
+          data.privatePackageId ?? current.privatePackageId;
+        if (!current.studentId || !privatePackageId)
+          throw new AppError(
+            "Paket Privat wajib dipilih untuk pertemuan privat.",
+            422,
+          );
+        await assertEligiblePrivatePackage({
+          studentId: current.studentId,
+          programId: program.id,
+          privatePackageId,
+        });
+      }
       const result = await prisma.teachingSession.update({
         where: { id: current.id },
         data: {
           tutorId: data.tutorId,
           programId: program.id,
           subjectId: data.subjectId,
+          privatePackageId:
+            current.sessionType === "PRIVATE"
+              ? (data.privatePackageId ?? current.privatePackageId)
+              : null,
           sessionDate: new Date(`${data.sessionDate}T00:00:00`),
           startTime: combineDateTime(data.sessionDate, data.startTime),
           endTime: combineDateTime(data.sessionDate, data.endTime),
@@ -1163,17 +1213,28 @@ router.put("/:id", requireAuth, async (req: Request, res: Response) => {
   const d = parsed.data;
   let meta: { changedBy: string; reason: string } | undefined;
 
-  if (req.user!.role === "TENTOR") {
-    return res.status(403).json({
-      error: "Forbidden",
-      message:
-        "Tentor tidak dapat mengubah jadwal langsung. Ajukan perubahan pada pertemuan terkait.",
-    });
-  } else if (req.user!.role !== "ADMIN") {
-    return res.status(403).json({ error: "Forbidden" });
-  }
-
   try {
+    if (req.user!.role === "TENTOR") {
+      const tutorId = await resolveTutorIdForUser(req.user!.userId);
+      const schedule = tutorId ? await getScheduleById(req.params.id) : null;
+      if (!schedule || schedule.tutorId !== tutorId) {
+        return res.status(403).json({
+          error: "Forbidden",
+          message: "Jadwal tidak ditemukan atau bukan milik Anda.",
+        });
+      }
+      const reason = d.reason?.trim();
+      if (!reason || reason.length < 3) {
+        return res.status(400).json({
+          error: "Validation error",
+          message: "Alasan perubahan wajib diisi (minimal 3 karakter).",
+        });
+      }
+      meta = { changedBy: req.user!.userId, reason };
+    } else if (req.user!.role !== "ADMIN") {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
     const referenceDate = d.startDate ?? localDateKey(new Date());
     const data: Record<string, unknown> = {};
     if (d.notes !== undefined) data.notes = d.notes;

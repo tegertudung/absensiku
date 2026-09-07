@@ -3,43 +3,52 @@
 // env vars are set BEFORE any import below runs — critical because importing
 // authRouter transitively constructs the Prisma Client, which needs DATABASE_URL
 // available immediately.
-import express from 'express';
-import cors from 'cors';
-import authRouter from './api/auth';
-import sessionsRouter from './api/sessions';
-import tutorsRouter from './api/tutors';
-import studentsRouter from './api/students';
-import subjectsRouter from './api/subjects';
-import classesRouter from './api/classes';
-import honorRatesRouter from './api/honorRates';
-import exportRouter from './api/export';
-import schedulesRouter from './api/schedules';
-import dashboardRouter from './api/dashboard';
-import privatePackagesRouter from './api/privatePackages';
-import { startOverdueSessionLockJob } from './jobs/lockOverdueSessions';
-import { startSessionReminderJob } from './jobs/sessionReminders';
-import auditLogsRouter from './api/auditLogs';
-import notificationsRouter from './api/notifications';
-import pushRouter from './api/push';
-import programsRouter from './api/programs';
-import settingsRouter from './api/settings';
-import honorSlipRouter from './api/honorSlip';
-import parentsRouter from './api/parents';
-import parentPortalRouter from './api/parentPortal';
-import studentLettersRouter from './api/studentLetters';
-import { SETTINGS_UPLOAD_ROOT } from './middleware/settingsUpload';
+import express from "express";
+import cors from "cors";
+import authRouter from "./api/auth";
+import sessionsRouter from "./api/sessions";
+import tutorsRouter from "./api/tutors";
+import studentsRouter from "./api/students";
+import subjectsRouter from "./api/subjects";
+import classesRouter from "./api/classes";
+import honorRatesRouter from "./api/honorRates";
+import exportRouter from "./api/export";
+import schedulesRouter from "./api/schedules";
+import dashboardRouter from "./api/dashboard";
+import privatePackagesRouter from "./api/privatePackages";
+import { startOverdueSessionLockJob } from "./jobs/lockOverdueSessions";
+import { startSessionReminderJob } from "./jobs/sessionReminders";
+import auditLogsRouter from "./api/auditLogs";
+import notificationsRouter from "./api/notifications";
+import pushRouter from "./api/push";
+import programsRouter from "./api/programs";
+import settingsRouter from "./api/settings";
+import honorSlipRouter from "./api/honorSlip";
+import parentsRouter from "./api/parents";
+import parentPortalRouter from "./api/parentPortal";
+import studentLettersRouter from "./api/studentLetters";
+import tutorMascotsRouter from "./api/tutorMascots";
+import { SETTINGS_UPLOAD_ROOT } from "./middleware/settingsUpload";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const ENV = process.env.NODE_ENV || 'development';
-app.disable('x-powered-by');
+const ENV = process.env.NODE_ENV || "development";
+app.disable("x-powered-by");
 app.use((_req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Referrer-Policy', 'no-referrer');
-  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Cache-Control", "no-store");
   const json = res.json.bind(res);
-  res.json = (body: unknown) => json(res.statusCode >= 500 ? { error: 'Internal server error', message: 'Terjadi kesalahan internal. Silakan coba kembali.' } : body);
+  res.json = (body: unknown) =>
+    json(
+      res.statusCode >= 500
+        ? {
+            error: "Internal server error",
+            message: "Terjadi kesalahan internal. Silakan coba kembali.",
+          }
+        : body,
+    );
   next();
 });
 
@@ -48,16 +57,20 @@ app.use((_req, res, next) => {
 // (comma-separated for multiple, e.g. preview + prod Vercel URLs). Left
 // unset, cors() falls back to allowing any origin — fine for local dev,
 // where the frontend is always http://localhost:3000 anyway.
-const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000,http://127.0.0.1:3000').split(',').map((o) => o.trim());
+const allowedOrigins = (
+  process.env.FRONTEND_URL || "http://localhost:3000,http://127.0.0.1:3000"
+)
+  .split(",")
+  .map((o) => o.trim());
 app.use(cors({ origin: allowedOrigins }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use('/uploads/settings', express.static(SETTINGS_UPLOAD_ROOT));
+app.use("/uploads/settings", express.static(SETTINGS_UPLOAD_ROOT));
 
 // Health check endpoint
-app.get('/api/health', (req, res) => {
+app.get("/api/health", (req, res) => {
   res.json({
-    status: 'Server running',
+    status: "Server running",
     environment: ENV,
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
@@ -65,41 +78,64 @@ app.get('/api/health', (req, res) => {
 });
 
 // API routes
-app.use('/api/auth', authRouter);
-app.use('/api/sessions', sessionsRouter);
-app.use('/api/tutors', tutorsRouter);
-app.use('/api/students', studentsRouter);
-app.use('/api/subjects', subjectsRouter);
-app.use('/api/classes', classesRouter);
-app.use('/api/honor-rates', honorRatesRouter);
-app.use('/api/export', exportRouter);
-app.use('/api/schedules', schedulesRouter);
-app.use('/api/dashboard', dashboardRouter);
-app.use('/api/private-packages', privatePackagesRouter);
-app.use('/api/audit-logs', auditLogsRouter);
-app.use('/api/notifications', notificationsRouter);
-app.use('/api/push', pushRouter);
-app.use('/api/programs', programsRouter);
-app.use('/api/settings', settingsRouter);
-app.use('/api/honor', honorSlipRouter);
-app.use('/api/parents', parentsRouter);
-app.use('/api/parent', parentPortalRouter);
-app.use('/api/student-letters', studentLettersRouter);
+app.use("/api/auth", authRouter);
+app.use("/api/sessions", sessionsRouter);
+app.use("/api/tutors", tutorsRouter);
+app.use("/api/students", studentsRouter);
+app.use("/api/subjects", subjectsRouter);
+app.use("/api/classes", classesRouter);
+app.use("/api/honor-rates", honorRatesRouter);
+app.use("/api/export", exportRouter);
+app.use("/api/schedules", schedulesRouter);
+app.use("/api/dashboard", dashboardRouter);
+app.use("/api/private-packages", privatePackagesRouter);
+app.use("/api/audit-logs", auditLogsRouter);
+app.use("/api/notifications", notificationsRouter);
+app.use("/api/push", pushRouter);
+app.use("/api/programs", programsRouter);
+app.use("/api/settings", settingsRouter);
+app.use("/api/honor", honorSlipRouter);
+app.use("/api/parents", parentsRouter);
+app.use("/api/parent", parentPortalRouter);
+app.use("/api/student-letters", studentLettersRouter);
+app.use("/api/tutor-mascots", tutorMascotsRouter);
 
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({
-    error: 'Endpoint not found',
+    error: "Endpoint not found",
     path: req.path,
     method: req.method,
   });
 });
 
 // Error handler
-app.use((err: { type?: string }, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  const status = err.type === 'entity.too.large' ? 413 : err.type === 'entity.parse.failed' ? 400 : 500;
-  res.status(status).json({ error: 'Request failed', message: status === 413 ? 'Ukuran request terlalu besar.' : status === 400 ? 'Format JSON tidak valid.' : 'Terjadi kesalahan internal.' });
-});
+app.use(
+  (
+    err: { type?: string },
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction,
+  ) => {
+    const status =
+      err.type === "entity.too.large"
+        ? 413
+        : err.type === "entity.parse.failed"
+          ? 400
+          : 500;
+    res
+      .status(status)
+      .json({
+        error: "Request failed",
+        message:
+          status === 413
+            ? "Ukuran request terlalu besar."
+            : status === 400
+              ? "Format JSON tidak valid."
+              : "Terjadi kesalahan internal.",
+      });
+  },
+);
 
 // Start server
 app.listen(PORT, () => {
@@ -118,7 +154,7 @@ app.listen(PORT, () => {
   startSessionReminderJob();
 });
 
-process.on('unhandledRejection', (reason: Error) => {
-  console.error('Unhandled Rejection:', reason);
+process.on("unhandledRejection", (reason: Error) => {
+  console.error("Unhandled Rejection:", reason);
   process.exit(1);
 });

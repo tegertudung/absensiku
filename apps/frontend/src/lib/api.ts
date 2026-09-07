@@ -1,10 +1,11 @@
-import axios from 'axios';
+import axios from "axios";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
 
 // Static assets (e.g. /uploads/settings/logo/...) are served from the backend
 // root, not under /api — strip the API suffix to get their origin.
-const API_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, '');
+const API_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, "");
 
 /** Resolve a server-relative asset path (e.g. settings.logoPath) to a full URL. */
 export function assetUrl(path: string | null | undefined): string | null {
@@ -21,25 +22,41 @@ export function assetUrl(path: string | null | undefined): string | null {
  * jam mulai.") behind DevTools.
  */
 export function errorMessage(error: unknown, fallback: string): string {
-  const data = (error as { response?: { data?: { message?: string; details?: Record<string, string[]> } } })
-    ?.response?.data;
+  const data = (
+    error as {
+      response?: {
+        data?: { message?: string; details?: Record<string, string[]> };
+      };
+    }
+  )?.response?.data;
   if (data?.message) return data.message;
   if (data?.details) {
     const first = Object.values(data.details).flat()[0];
-    if (typeof first === 'string') return first;
+    if (typeof first === "string") return first;
   }
   return fallback;
 }
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  headers: { 'Content-Type': 'application/json' },
+  headers: { "Content-Type": "application/json" },
 });
 
 // Attach the JWT to every request once the user is logged in.
 api.interceptors.request.use((config) => {
-  if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('absensiku_token');
+  // Let the browser/Axios supply the multipart boundary. The instance default
+  // is JSON, which otherwise leaves FormData requests without a usable
+  // multipart boundary for the backend upload parser.
+  if (typeof FormData !== "undefined" && config.data instanceof FormData) {
+    if (typeof config.headers.setContentType === "function") {
+      config.headers.setContentType(false);
+    } else {
+      delete config.headers["Content-Type"];
+      delete config.headers["content-type"];
+    }
+  }
+  if (typeof window !== "undefined") {
+    const token = localStorage.getItem("absensiku_token");
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -51,15 +68,15 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401 && typeof window !== 'undefined') {
-      localStorage.removeItem('absensiku_token');
-      localStorage.removeItem('absensiku_user');
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+    if (error.response?.status === 401 && typeof window !== "undefined") {
+      localStorage.removeItem("absensiku_token");
+      localStorage.removeItem("absensiku_user");
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
       }
     }
     return Promise.reject(error);
-  }
+  },
 );
 
 export default api;

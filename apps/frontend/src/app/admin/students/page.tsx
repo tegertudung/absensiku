@@ -14,11 +14,14 @@ import StatCard from "@/components/StatCard";
 import { IconClasses } from "@/components/icons";
 
 interface StudentProgramQuota {
-  type: "REGULAR" | "PRIVATE";
-  label: string;
-  quotaTotal: number;
-  quotaUsed: number;
-  quotaRemaining: number;
+  id: string;
+  programId: string;
+  programName: string;
+  programType: "REGULAR" | "PRIVATE";
+  className: string | null;
+  totalSessions: number;
+  usedSessions: number;
+  remainingSessions: number;
 }
 
 interface Student {
@@ -804,28 +807,28 @@ export default function AdminStudentsPage() {
                     </div>
                   </td>
                   <td className="px-4 py-3.5">
-                    {s.programEnrollments.length === 0 ? (
+                    {s.programs.length === 0 ? (
                       <span className="text-xs text-gray-400">
                         Belum ada program
                       </span>
                     ) : (
                       <div className="flex flex-wrap gap-1">
-                        {s.programEnrollments.map((enrollment) => (
+                        {s.programs.map((program) => (
                           <span
-                            key={enrollment.programId}
+                            key={program.programId}
                             className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-800"
                           >
-                            {enrollment.program?.name || "Program"}
+                            {program.programName}
                           </span>
                         ))}
                       </div>
                     )}
                   </td>
                   <td className="px-4 py-3.5 text-xs text-gray-600">
-                    {s.programEnrollments.length
-                      ? s.programEnrollments.map((enrollment) => (
-                          <p key={enrollment.programId}>
-                            {enrollment.class?.name || "Individual"}
+                    {s.programs.length
+                      ? s.programs.map((program) => (
+                          <p key={program.programId}>
+                            {program.className || "Individual"}
                           </p>
                         ))
                       : "-"}
@@ -834,16 +837,16 @@ export default function AdminStudentsPage() {
                     {s.programs.length === 0 ? (
                       <span className="text-gray-400">-</span>
                     ) : (
-                      s.programs.map((program, index) => (
+                      s.programs.map((program) => (
                         <p
-                          key={index}
+                          key={program.programId}
                           className={
-                            program.quotaRemaining === 0
+                            program.remainingSessions === 0
                               ? "font-medium text-red-700"
                               : "font-medium text-gray-700"
                           }
                         >
-                          {program.quotaRemaining}/{program.quotaTotal}
+                          {program.remainingSessions}/{program.totalSessions}
                         </p>
                       ))
                     )}

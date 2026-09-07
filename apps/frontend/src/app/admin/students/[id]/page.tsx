@@ -19,6 +19,12 @@ interface ProgramSummary {
   programId: string;
   program: Program;
   class: { id: string; name: string } | null;
+  programName: string;
+  programType: "REGULAR" | "PRIVATE";
+  className: string | null;
+  totalSessions: number;
+  usedSessions: number;
+  remainingSessions: number;
   quota: { quotaTotal: number; quotaRemaining: number };
 }
 
@@ -156,12 +162,12 @@ export default function AdminStudentDetailPage() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h3 className="font-medium text-gray-900">
-                      {enrollment.program.name}
+                      {enrollment.programName}
                     </h3>
                     <p className="mt-1 text-sm text-gray-600">
-                      {enrollment.program.learningModel === "CLASS_BASED"
+                      {enrollment.programType === "REGULAR"
                         ? `Berbasis Kelas · Kelas: ${enrollment.class?.name || "Belum dipilih"}`
-                        : "Individual"}
+                        : "Paket Privat"}
                     </p>
                   </div>
                   {!enrollment.program.isActive ? (
@@ -171,8 +177,8 @@ export default function AdminStudentDetailPage() {
                   ) : null}
                 </div>
                 <p className="mt-3 text-sm font-medium text-gray-800">
-                  Sisa Sesi: {enrollment.quota.quotaRemaining} /{" "}
-                  {enrollment.quota.quotaTotal}
+                  Sisa Sesi: {enrollment.remainingSessions} /{" "}
+                  {enrollment.totalSessions}
                 </p>
               </article>
             ))
@@ -234,7 +240,9 @@ export default function AdminStudentDetailPage() {
                         <span className="text-gray-400">
                           {" "}
                           · {formatTime(session.startTime)}
-                          {session.endTime ? `–${formatTime(session.endTime)}` : ""}
+                          {session.endTime
+                            ? `–${formatTime(session.endTime)}`
+                            : ""}
                         </span>
                       )}
                     </td>

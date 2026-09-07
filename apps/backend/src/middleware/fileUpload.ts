@@ -11,6 +11,7 @@ declare global {
   namespace Express {
     interface Request {
       uploadedFile?: UploadedFile;
+      uploadedFields?: Record<string, string>;
     }
   }
 }
@@ -28,12 +29,16 @@ function uploadError(res: Response, status: number, message: string) {
  * import endpoints only need the buffer for ExcelJS to parse, nothing is
  * persisted as an asset.
  */
-export function parseUploadedFile(options: { fieldName: string; maxSize: number }) {
+export function parseUploadedFile(options: {
+  fieldName: string;
+  maxSize: number;
+}) {
   return async (req: Request, res: Response, next: NextFunction) => {
     const contentType = req.headers["content-type"] || "";
-    const boundaryMatch = /^multipart\/form-data;\s*boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(
-      contentType,
-    );
+    const boundaryMatch =
+      /^multipart\/form-data;\s*boundary=(?:"([^"]+)"|([^;\s]+))/i.exec(
+        contentType,
+      );
     if (!boundaryMatch) return uploadError(res, 400, "File tidak ditemukan.");
 
     const chunks: Buffer[] = [];
@@ -60,6 +65,7 @@ export function parseUploadedFile(options: { fieldName: string; maxSize: number 
     const delimiter = `--${boundary}`;
     const parts = raw.toString("latin1").split(delimiter).slice(1, -1);
     const files: UploadedFile[] = [];
+    const fields: Record<string, string> = {};
 
     for (const part of parts) {
       const normalized = part.startsWith("\r\n") ? part.slice(2) : part;
@@ -71,11 +77,16 @@ export function parseUploadedFile(options: { fieldName: string; maxSize: number 
         /content-disposition:\s*form-data;[^\r\n]*/i.exec(headers)?.[0] || "";
       const fieldName = /name="([^"]+)"/i.exec(disposition)?.[1];
       const filename = /filename="([^"]*)"/i.exec(disposition)?.[1];
-      if (filename === undefined) continue; // not a file part
+      if (filename === undefined) {
+        if (fieldName) fields[fieldName] = content;
+        continue;
+      }
       if (fieldName !== options.fieldName) continue;
       const mimeType =
-        /content-type:\s*([^\r\n;]+)/i.exec(headers)?.[1]?.trim().toLowerCase() ||
-        "application/octet-stream";
+        /content-type:\s*([^\r\n;]+)/i
+          .exec(headers)?.[1]
+          ?.trim()
+          .toLowerCase() || "application/octet-stream";
       files.push({
         fieldName,
         filename,
@@ -84,7 +95,8 @@ export function parseUploadedFile(options: { fieldName: string; maxSize: number 
       });
     }
 
-    if (files.length === 0) return uploadError(res, 400, "File tidak ditemukan.");
+    if (files.length === 0)
+      return uploadError(res, 400, "File tidak ditemukan.");
     if (files.length !== 1)
       return uploadError(res, 400, "Hanya satu file yang dapat diunggah.");
     const file = files[0];
@@ -94,10 +106,10 @@ export function parseUploadedFile(options: { fieldName: string; maxSize: number 
         413,
         `Ukuran file maksimal ${Math.floor(options.maxSize / (1024 * 1024))} MB.`,
       );
-    if (file.content.length === 0)
-      return uploadError(res, 400, "File kosong.");
+    if (file.content.length === 0) return uploadError(res, 400, "File kosong.");
 
     req.uploadedFile = file;
+    req.uploadedFields = fields;
     next();
   };
 }

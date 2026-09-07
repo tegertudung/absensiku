@@ -13,6 +13,11 @@ import {
 } from "@/components/icons";
 
 type Option = { id: string; name: string; status?: string; isActive?: boolean };
+type EligiblePrivateStudent = Option & {
+  privatePackageId: string;
+  packageName: string;
+  quotaRemaining: number;
+};
 type Pattern = {
   id: string;
   classId: string;
@@ -29,6 +34,7 @@ type Meeting = {
   sessionType: string;
   classId: string | null;
   studentId: string | null;
+  privatePackageId?: string | null;
   scheduleId: string | null;
   patternOccurrenceDate: string | null;
   sessionDate: string;
@@ -142,7 +148,7 @@ export default function AdminSchedulesPage() {
   const [tutors, setTutors] = useState<Option[]>([]);
   const [eligibleTutors, setEligibleTutors] = useState<Option[]>([]);
   const [classes, setClasses] = useState<Option[]>([]);
-  const [students, setStudents] = useState<Option[]>([]);
+  const [students, setStudents] = useState<EligiblePrivateStudent[]>([]);
   const [subjects, setSubjects] = useState<Option[]>([]);
   const [programs, setPrograms] = useState<
     Array<Option & { learningModel: string; defaultMeetingQuota?: number }>
@@ -179,6 +185,7 @@ export default function AdminSchedulesPage() {
     programId: "",
     classId: "",
     studentId: "",
+    privatePackageId: "",
     tutorId: "",
     subjectId: "",
     sessionDate: iso(week),
@@ -202,7 +209,6 @@ export default function AdminSchedulesPage() {
         legacyRes,
         tutorRes,
         classRes,
-        studentRes,
         subjectRes,
         programRes,
       ] = await Promise.all([
@@ -211,7 +217,6 @@ export default function AdminSchedulesPage() {
         api.get("/schedules"),
         api.get("/tutors"),
         api.get("/classes"),
-        api.get("/students"),
         api.get("/subjects"),
         api.get("/programs?active=true"),
       ]);
@@ -221,9 +226,6 @@ export default function AdminSchedulesPage() {
       setTutors(tutorRes.data.data);
       setClasses(
         classRes.data.data.filter((row: Option) => row.status !== "INACTIVE"),
-      );
-      setStudents(
-        studentRes.data.data.filter((row: Option) => row.status === "ACTIVE"),
       );
       setSubjects(
         subjectRes.data.data.filter((row: Option) => row.isActive !== false),
@@ -238,6 +240,28 @@ export default function AdminSchedulesPage() {
   useEffect(() => {
     load();
   }, [load]);
+  useEffect(() => {
+    if (form.sessionType !== "PRIVATE" || !form.programId) {
+      setStudents([]);
+      return;
+    }
+    api
+      .get("/private-packages/eligible-students", {
+        params: { programId: form.programId },
+      })
+      .then((response) =>
+        setStudents(
+          response.data.data.map((item: any) => ({
+            id: item.studentId,
+            name: `${item.studentName} — ${item.packageName} (${item.quotaRemaining} sesi)`,
+            privatePackageId: item.privatePackageId,
+            packageName: item.packageName,
+            quotaRemaining: item.quotaRemaining,
+          })),
+        ),
+      )
+      .catch(() => setStudents([]));
+  }, [form.programId, form.sessionType]);
   useEffect(() => {
     if (!form.subjectId) {
       setEligibleTutors([]);
@@ -275,7 +299,9 @@ export default function AdminSchedulesPage() {
         location: meeting.location,
         classId: meeting.classId || undefined,
         patternId: meeting.scheduleId || undefined,
-        patternOccurrenceDate: meeting.patternOccurrenceDate ? iso(new Date(meeting.patternOccurrenceDate)) : undefined,
+        patternOccurrenceDate: meeting.patternOccurrenceDate
+          ? iso(new Date(meeting.patternOccurrenceDate))
+          : undefined,
         calendarState: getCalendarState(meeting),
         meeting,
       }));
@@ -292,9 +318,11 @@ export default function AdminSchedulesPage() {
     const legacyItems: CalendarItem[] = legacy
       .filter(
         (row) =>
-          !row.isPattern && !meetings.some(meeting => meeting.scheduleId === row.id) && (Boolean(row.occurrenceDate) ||
-          row.sessionType !== "REGULAR" ||
-          !patterns.some((pattern) => pattern.classId === row.classId)),
+          !row.isPattern &&
+          !meetings.some((meeting) => meeting.scheduleId === row.id) &&
+          (Boolean(row.occurrenceDate) ||
+            row.sessionType !== "REGULAR" ||
+            !patterns.some((pattern) => pattern.classId === row.classId)),
       )
       .flatMap((row) => {
         if (row.occurrenceDate) {
@@ -320,8 +348,12 @@ export default function AdminSchedulesPage() {
               programId: row.programId || undefined,
               patternId: row.patternId || undefined,
               incomplete: !row.tutor || !row.subject,
-              calendarState: row.status === "CANCELLED" ? "CANCELLED" :
-                !row.tutor || !row.subject ? "INCOMPLETE" : "WAITING_NOTE",
+              calendarState:
+                row.status === "CANCELLED"
+                  ? "CANCELLED"
+                  : !row.tutor || !row.subject
+                    ? "INCOMPLETE"
+                    : "WAITING_NOTE",
             },
           ];
         }
@@ -355,46 +387,48 @@ export default function AdminSchedulesPage() {
         ),
     );
     const existing = [...actual, ...compatibleLegacy];
-    const incomplete: CalendarItem[] = patterns.flatMap(
-      (pattern) =>
-        legacy.some(row => row.patternId === pattern.id) ? [] : Array.from({ length: 7 }, (_, offset) => {
-          const date = addDays(week, offset);
-          if (
-            date.getDay() !== pattern.dayOfWeek ||
-            handledPatternOccurrences.has(`${pattern.id}:${iso(date)}`) ||
-            actualRegularSlots.has(
-              slotKey(
-                pattern.classId,
-                date,
-                time(pattern.startTime),
-                time(pattern.endTime),
-              ),
-            ) ||
-            legacy.some(
-              (row) =>
-                row.patternId === pattern.id &&
-                row.occurrenceDate && iso(new Date(row.occurrenceDate)) === iso(date) &&
-                time(row.startTime) === time(pattern.startTime),
+    const incomplete: CalendarItem[] = patterns.flatMap((pattern) =>
+      legacy.some((row) => row.patternId === pattern.id)
+        ? []
+        : (Array.from({ length: 7 }, (_, offset) => {
+            const date = addDays(week, offset);
+            if (
+              date.getDay() !== pattern.dayOfWeek ||
+              handledPatternOccurrences.has(`${pattern.id}:${iso(date)}`) ||
+              actualRegularSlots.has(
+                slotKey(
+                  pattern.classId,
+                  date,
+                  time(pattern.startTime),
+                  time(pattern.endTime),
+                ),
+              ) ||
+              legacy.some(
+                (row) =>
+                  row.patternId === pattern.id &&
+                  row.occurrenceDate &&
+                  iso(new Date(row.occurrenceDate)) === iso(date) &&
+                  time(row.startTime) === time(pattern.startTime),
+              )
             )
-          )
-            return null;
-          return {
-            id: `pattern-${pattern.id}-${iso(date)}`,
-            eventKind: "pattern-preview" as const,
-            date,
-            start: time(pattern.startTime),
-            end: time(pattern.endTime),
-            sessionType: "REGULAR",
-            label: pattern.class?.name || "Kelas",
-            status: "INCOMPLETE",
-            classId: pattern.classId,
-            programId: pattern.programId || undefined,
-            patternId: pattern.id,
-            patternOccurrenceDate: iso(date),
-            incomplete: true,
-            calendarState: "INCOMPLETE",
-          };
-        }).filter(Boolean) as CalendarItem[],
+              return null;
+            return {
+              id: `pattern-${pattern.id}-${iso(date)}`,
+              eventKind: "pattern-preview" as const,
+              date,
+              start: time(pattern.startTime),
+              end: time(pattern.endTime),
+              sessionType: "REGULAR",
+              label: pattern.class?.name || "Kelas",
+              status: "INCOMPLETE",
+              classId: pattern.classId,
+              programId: pattern.programId || undefined,
+              patternId: pattern.id,
+              patternOccurrenceDate: iso(date),
+              incomplete: true,
+              calendarState: "INCOMPLETE",
+            };
+          }).filter(Boolean) as CalendarItem[]),
     );
     return [...existing, ...incomplete]
       .filter(
@@ -437,7 +471,9 @@ export default function AdminSchedulesPage() {
             subjectId: rawOccurrence.subjectId || "",
             tutorId: rawOccurrence.tutorId || "",
             patternId: rawOccurrence.patternId || "",
-            sessionDate: rawOccurrence.occurrenceDate ? iso(new Date(rawOccurrence.occurrenceDate)) : "",
+            sessionDate: rawOccurrence.occurrenceDate
+              ? iso(new Date(rawOccurrence.occurrenceDate))
+              : "",
             startTime: time(rawOccurrence.startTime),
             endTime: time(rawOccurrence.endTime),
             mode: rawOccurrence.mode || "OFFLINE",
@@ -467,6 +503,7 @@ export default function AdminSchedulesPage() {
       programId: item.meeting.programId || "",
       classId: item.meeting.classId || "",
       studentId: item.meeting.studentId || "",
+      privatePackageId: item.meeting.privatePackageId || "",
       tutorId: item.meeting.tutor.id,
       subjectId: item.meeting.subject?.id || "",
       sessionDate: iso(item.date),
@@ -511,6 +548,8 @@ export default function AdminSchedulesPage() {
       return setMutationError("Kelas pada pertemuan ini belum ditentukan.");
     if (form.sessionType === "PRIVATE" && !form.studentId)
       return setMutationError("Pilih siswa.");
+    if (form.sessionType === "PRIVATE" && !form.privatePackageId)
+      return setMutationError("Pilih siswa dengan paket Privat yang aktif.");
     if (!form.subjectId) return setMutationError("Pilih mata pelajaran.");
     if (!form.tutorId) return setMutationError("Pilih tentor.");
     setSaving(true);
@@ -521,6 +560,8 @@ export default function AdminSchedulesPage() {
         patternOccurrenceDate: form.patternOccurrenceDate || undefined,
         classId: form.sessionType === "REGULAR" ? form.classId : undefined,
         studentId: form.sessionType === "PRIVATE" ? form.studentId : undefined,
+        privatePackageId:
+          form.sessionType === "PRIVATE" ? form.privatePackageId : undefined,
         location:
           form.mode === "OFFLINE"
             ? form.location.trim() || undefined
@@ -697,7 +738,11 @@ export default function AdminSchedulesPage() {
                 className="rounded-md border px-3 py-2 text-sm"
               >
                 <option value="">Semua program</option>
-                {programs.map(program => <option key={program.id} value={program.id}>{program.name}</option>)}
+                {programs.map((program) => (
+                  <option key={program.id} value={program.id}>
+                    {program.name}
+                  </option>
+                ))}
               </select>
               <select
                 value={filter.tutor}
@@ -977,6 +1022,7 @@ export default function AdminSchedulesPage() {
                           : "REGULAR",
                       classId: "",
                       studentId: "",
+                      privatePackageId: "",
                     })
                   }
                 >
@@ -1019,7 +1065,16 @@ export default function AdminSchedulesPage() {
                         ? "Siswa tidak ditemukan."
                         : "Belum ada siswa yang tersedia."
                     }
-                    onSelect={(studentId) => setForm({ ...form, studentId })}
+                    onSelect={(studentId) => {
+                      const student = students.find(
+                        (item) => item.id === studentId,
+                      );
+                      setForm({
+                        ...form,
+                        studentId,
+                        privatePackageId: student?.privatePackageId || "",
+                      });
+                    }}
                   />
                 </Field>
               )}

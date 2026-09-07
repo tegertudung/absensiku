@@ -2,12 +2,23 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import api from "@/lib/api";
+import MascotImage from "@/components/MascotImage";
+import {
+  tutorCombineScheduleTime,
+  tutorDateKey,
+  tutorScheduleOccursOn,
+} from "@/lib/tutorAgenda";
+import {
+  renderTutorMascotTemplate,
+  selectTutorMascotState,
+  TutorMascotStateKey,
+} from "@/lib/tutorMascotDisplay";
 import { StatusBadge, TypeBadge } from "@/components/StatusBadge";
 import {
   IconWarning,
   IconBook,
-  IconStar,
   IconStudent,
   IconSchedule,
   IconClock,
@@ -22,6 +33,7 @@ interface Quota {
 
 interface SessionItem {
   id: string;
+  scheduleId?: string | null;
   sessionType: string;
   sessionDate: string;
   status: string;
@@ -31,6 +43,22 @@ interface SessionItem {
   startTime?: string | null;
   endTime?: string | null;
   schedule?: { startTime: string; endTime: string } | null;
+  virtual?: boolean;
+}
+
+interface ScheduleItem {
+  id: string;
+  sessionType: string;
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+  startDate: string;
+  endDate: string | null;
+  status: string;
+  occurrenceDate?: string | null;
+  class?: (Quota & { name: string }) | null;
+  student?: { name: string; packages?: Quota[] } | null;
+  subject?: { name: string } | null;
 }
 
 interface TentorDashboard {
@@ -40,14 +68,24 @@ interface TentorDashboard {
   totalCompletedSessions: number;
 }
 
+interface ActiveMascot {
+  id: string;
+  name: string;
+}
+
+interface TutorMascotDisplayConfig {
+  mode: "MANUAL" | "AUTO";
+  states: Record<
+    TutorMascotStateKey,
+    { mascotId: string | null; template: string }
+  >;
+}
+
 const CANCELLED_STATUSES = new Set(["CANCELLED", "CANCELLED_NOT_COUNTED"]);
 const DAY_LABELS = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
 
 function isoDate(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return tutorDateKey(date);
 }
 
 function addDays(date: Date, days: number) {
@@ -112,11 +150,66 @@ function monthRange(date: Date) {
   };
 }
 
+function weekOfMonth(date: Date) {
+  const first = new Date(date.getFullYear(), date.getMonth(), 1);
+  const offset = (first.getDay() + 6) % 7;
+  return Math.ceil((date.getDate() + offset) / 7);
+}
+
+function greetingName(name: string | null) {
+  return name?.trim().split(/\s+/)[0] || "Tentor";
+}
+
+function agendaSessionsForDate(
+  date: Date,
+  schedules: ScheduleItem[],
+  sessions: SessionItem[],
+) {
+  const dateKey = isoDate(date);
+  const sessionsForDate = sessions.filter(
+    (session) => isoDate(new Date(session.sessionDate)) === dateKey,
+  );
+  const usedScheduleIds = new Set<string>();
+  const agenda = schedules
+    .filter((schedule) => tutorScheduleOccursOn(schedule, date))
+    .map((schedule) => {
+      const existing = sessionsForDate.find(
+        (session) => session.scheduleId === schedule.id,
+      );
+      if (existing) {
+        usedScheduleIds.add(schedule.id);
+        return existing;
+      }
+      return {
+        id: `virtual-${schedule.id}-${dateKey}`,
+        scheduleId: schedule.id,
+        sessionType: schedule.sessionType,
+        sessionDate: dateKey,
+        status: "SCHEDULED",
+        class: schedule.class ?? null,
+        student: schedule.student ?? null,
+        subject: schedule.subject ?? null,
+        startTime: tutorCombineScheduleTime(date, schedule.startTime),
+        endTime: tutorCombineScheduleTime(date, schedule.endTime),
+        virtual: true,
+      } satisfies SessionItem;
+    });
+
+  return [
+    ...agenda,
+    ...sessionsForDate.filter((s) => !usedScheduleIds.has(s.scheduleId ?? "")),
+  ];
+}
+
 export default function TentorHomePage() {
   const [data, setData] = useState<TentorDashboard | null>(null);
+  const [activeMascot, setActiveMascot] = useState<ActiveMascot | null>(null);
+  const [mascotDisplayConfig, setMascotDisplayConfig] =
+    useState<TutorMascotDisplayConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(() => new Date());
+  const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
   const [rangeSessions, setRangeSessions] = useState<SessionItem[]>([]);
   const [scheduleLoading, setScheduleLoading] = useState(true);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
@@ -132,15 +225,35 @@ export default function TentorHomePage() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    api
+      .get("/tutor-mascots/display-config")
+      .then((response) =>
+        setMascotDisplayConfig(response.data.data as TutorMascotDisplayConfig),
+      )
+      .catch(() => setMascotDisplayConfig(null));
+  }, []);
+
+  useEffect(() => {
+    api
+      .get("/tutor-mascots/active")
+      .then((response) => setActiveMascot(response.data.data ?? null))
+      .catch(() => setActiveMascot(null));
+  }, []);
+
   const loadSelectedSchedule = useCallback(async () => {
     const range = monthRange(calendarOpen ? calendarMonth : selectedDate);
     setScheduleLoading(true);
     setScheduleError(null);
     try {
-      const res = await api.get("/sessions", {
-        params: { startDate: range.start, endDate: range.end },
-      });
-      setRangeSessions(res.data.data);
+      const [scheduleResponse, sessionResponse] = await Promise.all([
+        api.get("/schedules"),
+        api.get("/sessions", {
+          params: { startDate: range.start, endDate: range.end },
+        }),
+      ]);
+      setSchedules(scheduleResponse.data.data);
+      setRangeSessions(sessionResponse.data.data);
     } catch {
       setScheduleError("Gagal memuat jadwal.");
     } finally {
@@ -167,7 +280,7 @@ export default function TentorHomePage() {
     );
 
   const now = new Date();
-  const stripDays = Array.from({ length: 15 }, (_, i) =>
+  const weekDays = Array.from({ length: 9 }, (_, i) =>
     addDays(selectedDate, i - 4),
   );
   const monthLabel = selectedDate.toLocaleDateString("id-ID", {
@@ -176,17 +289,48 @@ export default function TentorHomePage() {
   });
   const selectedDateKey = isoDate(selectedDate);
   const isSelectedToday = selectedDateKey === isoDate(now);
-  const sessionsByDate = new Set(
-    rangeSessions.map((session) => isoDate(new Date(session.sessionDate))),
+  const sessionsForDate = (date: Date) =>
+    agendaSessionsForDate(date, schedules, rangeSessions);
+  const todayMascotSessions = agendaSessionsForDate(
+    now,
+    schedules,
+    data.todaySessions,
   );
-  const selectedSessions = rangeSessions.filter(
-    (session) => isoDate(new Date(session.sessionDate)) === selectedDateKey,
+  const mascotState =
+    mascotDisplayConfig?.mode === "AUTO"
+      ? selectTutorMascotState(todayMascotSessions, now)
+      : null;
+  const mascotDisplayRule = mascotState
+    ? mascotDisplayConfig!.states[mascotState.state]
+    : null;
+  const mascotId = mascotDisplayRule?.mascotId ?? activeMascot?.id ?? null;
+  const mascotSubtitle = mascotDisplayRule
+    ? renderTutorMascotTemplate(mascotDisplayRule.template, {
+        nama: greetingName(data.tutorName),
+        jumlahSesi: mascotState!.activeSessions.length,
+        jamBerikutnya: mascotState?.nextSession
+          ? formatTime(
+              mascotState.nextSession.startTime ||
+                mascotState.nextSession.schedule!.startTime,
+            )
+          : "",
+        mapelBerikutnya: mascotState?.nextSession?.subject?.name || "",
+        kelasBerikutnya: mascotState?.nextSession
+          ? sessionTitle(mascotState.nextSession) || ""
+          : "",
+      })
+    : "Siapmi mengajar hari ini?";
+  const selectedSessions = sessionsForDate(selectedDate);
+  const sessionsByDate = new Set(
+    weekDays
+      .filter((date) => sessionsForDate(date).length > 0)
+      .map((date) => isoDate(date)),
   );
 
-  const activeToday = data.todaySessions.filter(
+  const activeSelectedSessions = selectedSessions.filter(
     (s) => !CANCELLED_STATUSES.has(s.status),
   );
-  const totalMinutesToday = activeToday.reduce(
+  const totalMinutesSelected = activeSelectedSessions.reduce(
     (sum, s) => sum + (sessionMinutes(s) ?? 0),
     0,
   );
@@ -215,64 +359,144 @@ export default function TentorHomePage() {
   };
   const upcomingSessions = sortedSessions.filter(isUpcoming);
   const pastSessions = sortedSessions.filter((s) => !isUpcoming(s));
-  const nextSession = isSelectedToday ? (upcomingSessions[0] ?? null) : null;
-  const scheduleTitle = isSelectedToday
-    ? "Jadwal Hari Ini"
-    : `Jadwal ${selectedDate.toLocaleDateString("id-ID", { day: "numeric", month: "long" })}`;
+  const summarySession = isSelectedToday
+    ? (upcomingSessions[0] ?? sortedSessions[0] ?? null)
+    : (sortedSessions[0] ?? null);
 
   return (
-    <div className="space-y-6">
-      {/* Greeting card */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-navy-900 to-navy-700 p-5 text-white shadow-sm">
-        <span className="absolute right-4 top-4 rounded-full bg-white/15 px-3 py-1 text-[11px] font-medium">
-          Tentor
-        </span>
-        <p className="text-sm text-navy-200">Selamat datang,</p>
-        <p className="mt-0.5 text-lg font-semibold">
-          {data.tutorName || "Tentor"}
+    <div className="mx-auto max-w-md">
+      <section className="relative mb-4 min-h-[96px] pt-1">
+        <div className="inline-flex items-center gap-2 rounded-full bg-sky-50 px-3 py-1.5 text-xs font-medium text-blue-700">
+          <span className="h-2 w-2 rounded-full bg-blue-500" />
+          {selectedDate.toLocaleDateString("id-ID", {
+            weekday: "long",
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+          })}
+        </div>
+        <h1 className="mt-2 max-w-[240px] text-xl font-bold tracking-tight text-navy-900">
+          Pagi, Kak {greetingName(data.tutorName)}{" "}
+          <span aria-hidden="true">👋</span>
+        </h1>
+        <p className="mt-0.5 max-w-[235px] text-[13px] leading-5 text-slate-500">
+          {mascotSubtitle}
         </p>
+        <div className="absolute right-3 top-0 flex h-20 w-20 shrink-0 items-center justify-center overflow-visible min-[390px]:h-[88px] min-[390px]:w-[88px] sm:h-[92px] sm:w-[92px]">
+          {mascotId ? (
+            <MascotImage
+              mascotId={mascotId}
+              fallbackMascotId={
+                activeMascot && mascotId !== activeMascot.id
+                  ? activeMascot.id
+                  : null
+              }
+              alt={activeMascot?.name || "Maskot Pioneer Class"}
+              fallbackSrc="/tentor-akpol-mascot.png"
+              className="h-full w-full object-contain"
+            />
+          ) : (
+            <Image
+              src="/tentor-akpol-mascot.png"
+              alt="Maskot Pioneer Class"
+              width={92}
+              height={92}
+              priority
+              className="h-full w-full object-contain"
+            />
+          )}
+        </div>
+      </section>
 
-        <div className="mt-4 flex items-center gap-6 border-t border-white/10 pt-4">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/10">
-              <IconSchedule className="h-4 w-4" />
-            </div>
-            <div>
-              <p className="text-base font-semibold leading-none">
-                {data.todaySessions.length}
-              </p>
-              <p className="mt-1 text-[11px] text-navy-200">Sesi Hari Ini</p>
-            </div>
+      <section className="mb-6 rounded-2xl bg-gradient-to-br from-navy-950 to-navy-800 p-4 text-white shadow-sm">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-medium text-navy-200">
+              RINGKASAN HARI INI
+            </p>
+            <h2 className="mt-1 text-xl font-semibold tracking-tight">
+              Jadwal ta hari ini
+            </h2>
           </div>
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/10">
-              <IconClock className="h-4 w-4" />
+          <span className="rounded-full border border-white/20 px-2.5 py-1 text-[11px] font-medium text-navy-100">
+            Tentor
+          </span>
+        </div>
+        <div className="mt-3 border-t border-white/15 pt-3">
+          <div className="flex">
+            <div className="flex min-w-0 flex-1 items-center gap-2 pr-3">
+              <IconSchedule className="h-5 w-5 shrink-0 text-navy-100" />
+              <div>
+                <p className="text-[17px] font-semibold leading-tight">
+                  {activeSelectedSessions.length}
+                </p>
+                <p className="mt-0.5 text-[10px] text-navy-200">
+                  Sesi Hari Ini
+                </p>
+              </div>
             </div>
-            <div>
-              <p className="text-base font-semibold leading-none">
-                {formatHours(totalMinutesToday)}
-              </p>
-              <p className="mt-1 text-[11px] text-navy-200">Jam Mengajar</p>
+            <div className="flex min-w-0 flex-1 items-center gap-2 border-l border-white/15 pl-3">
+              <IconClock className="h-5 w-5 shrink-0 text-navy-100" />
+              <div>
+                <p className="text-[17px] font-semibold leading-tight">
+                  {formatHours(totalMinutesSelected)}
+                </p>
+                <p className="mt-0.5 text-[10px] text-navy-200">Jam Mengajar</p>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+        <div className="mt-3 border-t border-white/15 pt-2">
+          {summarySession ? (
+            <div className="flex min-h-5 items-center gap-2 text-[11px] text-navy-200">
+              <IconSchedule className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">
+                Berikutnya ·{" "}
+                {summarySession.subject?.name ||
+                  sessionTitle(summarySession) ||
+                  "Sesi mengajar"}
+                {(summarySession.startTime ||
+                  summarySession.schedule?.startTime) &&
+                (summarySession.endTime || summarySession.schedule?.endTime)
+                  ? ` · ${formatTime(summarySession.startTime || summarySession.schedule!.startTime)}–${formatTime(summarySession.endTime || summarySession.schedule!.endTime)}`
+                  : ""}
+              </span>
+            </div>
+          ) : (
+            <Link
+              href={`/tentor/schedule?date=${selectedDateKey}`}
+              className="flex min-h-5 items-center gap-2 text-[11px] text-navy-200 transition-colors hover:text-white active:opacity-75"
+            >
+              <IconSchedule className="h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 flex-1 truncate">
+                Cekmi tanggal lain untuk lihat jadwal
+              </span>
+              <IconChevronRight className="h-3.5 w-3.5 shrink-0" />
+            </Link>
+          )}
+        </div>
+      </section>
 
       {/* Navigasi tanggal */}
-      <div>
-        <button
-          type="button"
-          onClick={() => {
-            setCalendarMonth(selectedDate);
-            setCalendarOpen(true);
-          }}
-          className="mb-3 flex min-h-10 items-center gap-1 text-sm font-semibold capitalize text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-navy-700"
-        >
-          {monthLabel}
-          <IconChevronRight className="h-4 w-4 rotate-90" />
-        </button>
-        <div className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {stripDays.map((d) => {
+      <section className="mb-6">
+        <div className="mb-3 flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => {
+              setCalendarMonth(selectedDate);
+              setCalendarOpen(true);
+            }}
+            className="flex min-h-10 items-center gap-1 text-lg font-semibold capitalize text-navy-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-navy-700"
+          >
+            {monthLabel}
+            <IconChevronRight className="h-4 w-4 rotate-90" />
+          </button>
+          <span className="text-xs text-slate-400">
+            Minggu ke-{weekOfMonth(selectedDate)}
+          </span>
+        </div>
+        <div className="-mx-4 flex flex-nowrap gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {weekDays.map((d) => {
             const isSelected = isoDate(d) === selectedDateKey;
             const hasSchedule = sessionsByDate.has(isoDate(d));
             return (
@@ -283,14 +507,16 @@ export default function TentorHomePage() {
                 aria-pressed={isSelected}
                 ref={isSelected ? selectedCardRef : null}
                 aria-label={`Pilih ${d.toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long" })}`}
-                className={`flex h-[104px] w-[58px] shrink-0 snap-center flex-col items-center justify-center gap-1.5 rounded-xl border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-navy-700 focus-visible:ring-offset-2 ${
+                className={`flex h-[62px] w-[52px] shrink-0 flex-none flex-col items-center justify-center gap-0.5 rounded-xl border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-navy-700 focus-visible:ring-offset-2 ${
                   isSelected
                     ? "border-navy-900 bg-navy-900 text-white ring-2 ring-navy-100"
                     : "border-gray-100 bg-white text-gray-600 hover:border-navy-200 hover:bg-navy-50"
                 }`}
               >
-                <span className="text-[11px]">{DAY_LABELS[d.getDay()]}</span>
-                <span className="text-sm font-semibold">{d.getDate()}</span>
+                <span className="text-[10px]">{DAY_LABELS[d.getDay()]}</span>
+                <span className="text-sm font-semibold leading-none">
+                  {d.getDate()}
+                </span>
                 {hasSchedule ? (
                   <span
                     className={`h-1.5 w-1.5 rounded-full ${isSelected ? "bg-white" : "bg-blue-600"}`}
@@ -303,27 +529,19 @@ export default function TentorHomePage() {
             );
           })}
         </div>
-      </div>
-
-      {/* Jadwal Berikutnya */}
-      {nextSession && (
-        <div>
-          <div className="mb-2 flex items-center gap-1.5">
-            <IconStar className="h-4 w-4 text-amber-400" />
-            <h2 className="text-sm font-semibold text-gray-900">
-              Jadwal Berikutnya
-            </h2>
-          </div>
-          <NextSessionCard session={nextSession} />
-        </div>
-      )}
+      </section>
 
       {/* Jadwal tanggal terpilih */}
-      <div>
+      <section>
         <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-900">
-            {scheduleTitle}
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold tracking-tight text-navy-900">
+              Jadwal Hari Ini
+            </h2>
+            <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-500">
+              {selectedSessions.length}
+            </span>
+          </div>
           <Link
             href={`/tentor/schedule?date=${selectedDateKey}`}
             className="text-xs font-medium text-navy-700 hover:underline"
@@ -351,11 +569,7 @@ export default function TentorHomePage() {
             </button>
           </div>
         ) : selectedSessions.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-gray-200 bg-white px-4 py-6 text-center">
-            <p className="text-sm text-gray-400">
-              Tidak ada jadwal pada tanggal ini.
-            </p>
-          </div>
+          <EmptyScheduleState selectedDate={selectedDateKey} />
         ) : (
           <div className="space-y-2">
             {pastSessions.map((s) => (
@@ -375,7 +589,7 @@ export default function TentorHomePage() {
             ))}
           </div>
         )}
-      </div>
+      </section>
 
       {data.unfinishedSessions.length > 0 && (
         <div>
@@ -418,6 +632,29 @@ export default function TentorHomePage() {
           }}
         />
       )}
+    </div>
+  );
+}
+
+function EmptyScheduleState({ selectedDate }: { selectedDate: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white px-5 py-6 text-center shadow-sm">
+      <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl bg-sky-50 text-sky-600">
+        <IconSchedule className="h-5 w-5" />
+      </span>
+      <p className="mt-3 text-sm font-semibold text-navy-900">
+        Belum ada sesi di tanggal ini
+      </p>
+      <p className="mx-auto mt-1 max-w-[240px] text-xs leading-5 text-slate-400">
+        Santaimi dulu. Pilih tanggal lain kalau mau cek jadwal mengajar ta.
+      </p>
+      <Link
+        href={`/tentor/schedule?date=${selectedDate}`}
+        className="mt-3 inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 text-[11px] font-semibold text-navy-800 transition hover:border-navy-200 hover:bg-navy-50"
+      >
+        <IconSchedule className="h-4 w-4 text-blue-600" />
+        Buka Kalender Lengkap
+      </Link>
     </div>
   );
 }
@@ -591,6 +828,9 @@ function SessionRow({ session: s }: { session: SessionItem }) {
   const canFillNow = s.status === "IN_PROGRESS" || s.status === "SCHEDULED";
   const start = s.startTime || s.schedule?.startTime;
   const end = s.endTime || s.schedule?.endTime;
+  const href = s.virtual
+    ? `/tentor/schedule?date=${isoDate(new Date(s.sessionDate))}`
+    : `/tentor/sessions/${s.id}`;
   const content = (
     <div
       className={`flex gap-3 rounded-xl border bg-white p-3 ${isEmpty ? "border-red-200 bg-red-50/40" : "border-gray-200"}`}
@@ -625,8 +865,8 @@ function SessionRow({ session: s }: { session: SessionItem }) {
 
   return (
     <Link
-      href={`/tentor/sessions/${s.id}`}
-      aria-label={`Lihat detail sesi ${s.subject?.name || sessionTitle(s) || ""}`}
+      href={href}
+      aria-label={`${s.virtual ? "Lihat jadwal" : "Lihat detail sesi"} ${s.subject?.name || sessionTitle(s) || ""}`}
       className="block cursor-pointer transition active:scale-[0.99] focus:outline-none focus-visible:ring-2 focus-visible:ring-navy-700 focus-visible:ring-offset-2"
     >
       {content}

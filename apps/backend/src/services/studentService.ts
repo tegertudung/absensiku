@@ -29,7 +29,11 @@ async function assertStudentIdentityAvailable(
     },
     select: { id: true, name: true },
   });
-  const duplicate = candidates.some(s => normalizeStudentName(s.name).toLowerCase() === normalizeStudentName(name).toLowerCase());
+  const duplicate = candidates.some(
+    (s) =>
+      normalizeStudentName(s.name).toLowerCase() ===
+      normalizeStudentName(name).toLowerCase(),
+  );
   if (duplicate)
     throw new AppError(
       "Data siswa dengan nama dan nomor telepon tersebut sudah terdaftar.",
@@ -127,54 +131,147 @@ export async function createStudent(data: {
   });
 }
 
-export async function listStudents() {
-  const students = await prisma.student.findMany({
-    include: {
-      programEnrollments: {
-        where: { status: "ACTIVE" },
-        include: { program: true, class: true },
+/**
+ * Single presentation source for student session balances. Both the list and
+ * detail endpoints consume this, so a class/package balance is never derived
+ * differently on each screen.
+ */
+function buildProgramSessionSummaries(
+  programEnrollments: any[],
+  packages: any[],
+  regularUsageByClassProgram: Map<string, number>,
+) {
+  const activeEnrollments = programEnrollments.filter(
+    (enrollment) => enrollment.status === "ACTIVE",
+  );
+  const activeIndividualProgramIds = activeEnrollments
+    .filter((enrollment) => enrollment.program.learningModel === "INDIVIDUAL")
+    .map((enrollment) => enrollment.programId);
+
+  return activeEnrollments.map((enrollment) => {
+    const isRegular = enrollment.program.learningModel === "CLASS_BASED";
+    const matchingPackages = packages.filter(
+      (pkg) =>
+        pkg.status === "ACTIVE" &&
+        (pkg.programId === enrollment.programId ||
+          (pkg.programId === null &&
+            activeIndividualProgramIds.length === 1 &&
+            activeIndividualProgramIds[0] === enrollment.programId)),
+    );
+    // New package creation enforces one active package. Historical package
+    // data is only used when it has one unambiguous source; never pick first.
+    const privatePackage =
+      matchingPackages.length === 1 ? matchingPackages[0] : null;
+    const regularKey = `${enrollment.programId}:${enrollment.classId ?? ""}`;
+    const regularUsed = regularUsageByClassProgram.get(regularKey) ?? 0;
+    const quota =
+      isRegular && enrollment.class
+        ? {
+            totalSessions: enrollment.program.defaultMeetingQuota,
+            usedSessions: regularUsed,
+            remainingSessions: Math.max(
+              0,
+              enrollment.program.defaultMeetingQuota - regularUsed,
+            ),
+          }
+        : privatePackage
+          ? {
+              totalSessions: privatePackage.quotaTotal,
+              usedSessions: privatePackage.quotaUsed,
+              remainingSessions: privatePackage.quotaRemaining,
+            }
+          : {
+              totalSessions: enrollment.program.defaultMeetingQuota,
+              usedSessions: 0,
+              remainingSessions: enrollment.program.defaultMeetingQuota,
+            };
+
+    return {
+      id: enrollment.id,
+      programId: enrollment.programId,
+      programName: enrollment.program.name,
+      programType: isRegular ? "REGULAR" : "PRIVATE",
+      learningModel: enrollment.program.learningModel,
+      className: isRegular ? (enrollment.class?.name ?? null) : "Individual",
+      privatePackageId: privatePackage?.id ?? null,
+      packageName: privatePackage?.packageName ?? null,
+      ...quota,
+      // Backward-compatible nested data for existing consumers.
+      status: enrollment.status,
+      program: enrollment.program,
+      class: enrollment.class,
+      quota: {
+        quotaTotal: quota.totalSessions,
+        quotaUsed: quota.usedSessions,
+        quotaRemaining: quota.remainingSessions,
       },
-      enrollments: {
-        where: { status: "ACTIVE" },
-        include: {
-          class: {
-            select: {
-              id: true,
-              name: true,
-              quotaTotal: true,
-              quotaUsed: true,
-              quotaRemaining: true,
-            },
+    };
+  });
+}
+
+function createRegularUsageMap(
+  rows: Array<{
+    programId: string | null;
+    classId: string | null;
+    _count: number;
+  }>,
+) {
+  const usage = new Map<string, number>();
+  for (const row of rows) {
+    if (!row.programId || !row.classId) continue;
+    const key = `${row.programId}:${row.classId}`;
+    usage.set(key, (usage.get(key) ?? 0) + row._count);
+  }
+  return usage;
+}
+
+export async function listStudents() {
+  const [students, regularUsage] = await Promise.all([
+    prisma.student.findMany({
+      include: {
+        programEnrollments: {
+          where: { status: "ACTIVE" },
+          include: { program: true, class: true },
+        },
+        packages: {
+          where: { status: "ACTIVE" },
+          select: {
+            id: true,
+            programId: true,
+            status: true,
+            packageName: true,
+            quotaTotal: true,
+            quotaUsed: true,
+            quotaRemaining: true,
+            activationDate: true,
+          },
+          orderBy: { activationDate: "asc" },
+        },
+        _count: {
+          select: {
+            enrollments: true,
+            packages: true,
+            schedules: true,
+            sessions: true,
           },
         },
-        orderBy: { enrollmentDate: "asc" },
       },
-      packages: {
-        where: { status: "ACTIVE" },
-        select: {
-          id: true,
-          packageName: true,
-          quotaTotal: true,
-          quotaUsed: true,
-          quotaRemaining: true,
-          activationDate: true,
-        },
-        orderBy: { activationDate: "asc" },
+      orderBy: { name: "asc" },
+    }),
+    prisma.teachingSession.groupBy({
+      by: ["programId", "classId"],
+      where: {
+        status: "COMPLETED",
+        programId: { not: null },
+        classId: { not: null },
       },
-      _count: {
-        select: {
-          enrollments: true,
-          packages: true,
-          schedules: true,
-          sessions: true,
-        },
-      },
-    },
-    orderBy: { name: "asc" },
-  });
+      _count: true,
+    }),
+  ]);
+  const regularUsageByClassProgram = createRegularUsageMap(regularUsage);
 
   return students.map(
-    ({ enrollments, packages, programEnrollments, _count, ...student }) => ({
+    ({ packages, programEnrollments, _count, ...student }) => ({
       ...student,
       programEnrollments,
       hasOperationalHistory:
@@ -182,22 +279,11 @@ export async function listStudents() {
         _count.packages > 0 ||
         _count.schedules > 0 ||
         _count.sessions > 0,
-      programs: [
-        ...enrollments.map((enrollment) => ({
-          type: "REGULAR" as const,
-          label: enrollment.class.name,
-          quotaTotal: enrollment.class.quotaTotal,
-          quotaUsed: enrollment.class.quotaUsed,
-          quotaRemaining: enrollment.class.quotaRemaining,
-        })),
-        ...packages.map((pkg) => ({
-          type: "PRIVATE" as const,
-          label: pkg.packageName || "Paket Privat",
-          quotaTotal: pkg.quotaTotal,
-          quotaUsed: pkg.quotaUsed,
-          quotaRemaining: pkg.quotaRemaining,
-        })),
-      ],
+      programs: buildProgramSessionSummaries(
+        programEnrollments,
+        packages,
+        regularUsageByClassProgram,
+      ),
     }),
   );
 }
@@ -296,6 +382,7 @@ export async function getStudentById(id: string) {
               name: true,
               level: true,
               quotaTotal: true,
+              quotaUsed: true,
               quotaRemaining: true,
             },
           },
@@ -334,51 +421,17 @@ export async function getStudentById(id: string) {
     },
     orderBy: { sessionDate: "desc" },
   });
-  const programSummaries = await Promise.all(
-    activeProgramEnrollments.map(async (enrollment) => {
-      const packageForProgram = student.packages.find(
-        (pkg) =>
-          pkg.programId === enrollment.programId && pkg.status === "ACTIVE",
-      );
-      const completedSessions =
-        enrollment.program.learningModel === "CLASS_BASED"
-          ? enrollment.classId
-            ? await prisma.teachingSession.count({
-                where: {
-                  status: "COMPLETED",
-                  programId: enrollment.programId,
-                  classId: enrollment.classId,
-                },
-              })
-            : 0
-          : sessions.filter(
-              (session) =>
-                session.programId === enrollment.programId &&
-                session.studentId === id,
-            ).length;
-      const quota =
-        enrollment.program.learningModel === "CLASS_BASED" && enrollment.class
-          ? {
-              quotaTotal: enrollment.program.defaultMeetingQuota,
-              quotaRemaining: Math.max(
-                0,
-                enrollment.program.defaultMeetingQuota - completedSessions,
-              ),
-            }
-          : packageForProgram
-            ? {
-                quotaTotal: packageForProgram.quotaTotal,
-                quotaRemaining: packageForProgram.quotaRemaining,
-              }
-            : {
-                quotaTotal: enrollment.program.defaultMeetingQuota,
-                quotaRemaining: Math.max(
-                  0,
-                  enrollment.program.defaultMeetingQuota - completedSessions,
-                ),
-              };
-      return { ...enrollment, quota };
-    }),
+  const regularUsageByClassProgram = createRegularUsageMap(
+    sessions.map((session) => ({
+      programId: session.programId,
+      classId: session.classId,
+      _count: 1,
+    })),
+  );
+  const programSummaries = buildProgramSessionSummaries(
+    activeProgramEnrollments,
+    student.packages,
+    regularUsageByClassProgram,
   );
   const sessionHistory = sessions.filter((session) =>
     activeProgramEnrollments.some(
@@ -386,7 +439,10 @@ export async function getStudentById(id: string) {
         session.programId === enrollment.programId &&
         (enrollment.program.learningModel === "CLASS_BASED"
           ? session.classId === enrollment.classId
-          : session.studentId === id || session.attendanceRecords.some(record => record.studentId === id)),
+          : session.studentId === id ||
+            session.attendanceRecords.some(
+              (record) => record.studentId === id,
+            )),
     ),
   );
   return { ...student, programSummaries, sessionHistory };
@@ -501,10 +557,18 @@ export async function updateStudent(
       programEnrollments: _programEnrollments,
       ...profile
     } = data;
-    return tx.student.update({ where: { id }, data: { ...profile,
-      ...(profile.name !== undefined ? { name: normalizeStudentName(profile.name) } : {}),
-      ...(profile.phone !== undefined ? { phone: normalizeStudentPhone(profile.phone) } : {}),
-    } });
+    return tx.student.update({
+      where: { id },
+      data: {
+        ...profile,
+        ...(profile.name !== undefined
+          ? { name: normalizeStudentName(profile.name) }
+          : {}),
+        ...(profile.phone !== undefined
+          ? { phone: normalizeStudentPhone(profile.phone) }
+          : {}),
+      },
+    });
   });
 }
 

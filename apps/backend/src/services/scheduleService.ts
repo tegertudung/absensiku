@@ -8,6 +8,7 @@ import {
 } from "./notificationService";
 import { getMinimumScheduleStartGapMinutes } from "./settingsService";
 import { getProgramForSessionType } from "./programService";
+import { assertEligiblePrivatePackage } from "./privatePackageService";
 
 const DAY_NAMES = [
   "Minggu",
@@ -182,6 +183,7 @@ export async function createSchedule(data: {
   programId: string;
   classId?: string;
   studentId?: string;
+  privatePackageId?: string;
   subjectId?: string;
   dayOfWeek: number;
   startTime: Date;
@@ -202,6 +204,9 @@ export async function createSchedule(data: {
   }
   if (data.sessionType === "PRIVATE" && !data.studentId) {
     throw new AppError("studentId wajib diisi untuk jadwal privat", 400);
+  }
+  if (data.sessionType === "PRIVATE" && !data.privatePackageId) {
+    throw new AppError("Paket Privat wajib dipilih untuk jadwal privat.", 422);
   }
   if (data.startTime.getTime() >= data.endTime.getTime()) {
     throw new AppError("Jam mulai harus sebelum jam selesai", 400);
@@ -225,12 +230,21 @@ export async function createSchedule(data: {
     (data.sessionType === "REGULAR")
   )
     throw new AppError("Program tidak sesuai dengan jenis jadwal.", 400);
+  if (data.sessionType === "PRIVATE") {
+    await assertEligiblePrivatePackage({
+      studentId: data.studentId!,
+      programId: program.id,
+      privatePackageId: data.privatePackageId!,
+    });
+  }
   const schedule = await prisma.schedule.create({
     data: {
       tutorId: data.tutorId,
       sessionType: data.sessionType,
       classId: data.sessionType === "REGULAR" ? data.classId : undefined,
       studentId: data.sessionType === "PRIVATE" ? data.studentId : undefined,
+      privatePackageId:
+        data.sessionType === "PRIVATE" ? data.privatePackageId : undefined,
       subjectId: data.subjectId,
       programId: program.id,
       dayOfWeek: data.dayOfWeek,
@@ -312,6 +326,14 @@ export async function listSchedules(filters: {
             select: { quotaTotal: true, quotaRemaining: true },
             take: 1,
           },
+        },
+      },
+      privatePackage: {
+        select: {
+          id: true,
+          packageName: true,
+          quotaTotal: true,
+          quotaRemaining: true,
         },
       },
       subject: { select: { name: true } },

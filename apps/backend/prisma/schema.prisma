@@ -94,6 +94,16 @@ model SystemSetting {
   updatedAt DateTime @updatedAt
 }
 
+model TutorMascot {
+  id               String   @id @default(uuid())
+  name             String
+  originalFileName String
+  mimeType         String
+  imageData        Bytes
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
 // ============================================
 // 3. STUDENTS
 // ============================================
@@ -315,6 +325,9 @@ model Schedule {
   sessionType String // 'REGULAR' | 'PRIVATE'
   classId     String?
   studentId   String?
+  // PRIVATE schedules are pinned to the package selected at creation time.
+  // This avoids choosing an arbitrary active package when the session is completed.
+  privatePackageId String?
   subjectId   String?
   programId   String?
   dayOfWeek   Int // 0=Sunday, 6=Saturday
@@ -339,15 +352,16 @@ model Schedule {
   tutor    Tutor?            @relation(fields: [tutorId], references: [id], onDelete: Cascade)
   class    Class?            @relation(fields: [classId], references: [id], onDelete: SetNull)
   student  Student?          @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  privatePackage PrivatePackage? @relation("PrivatePackageSchedules", fields: [privatePackageId], references: [id], onDelete: SetNull)
   subject  Subject?          @relation(fields: [subjectId], references: [id], onDelete: SetNull)
   program  Program?          @relation(fields: [programId], references: [id], onDelete: SetNull)
   pattern  Schedule?         @relation("PatternOccurrences", fields: [patternId], references: [id], onDelete: SetNull)
   occurrences Schedule[]     @relation("PatternOccurrences")
   sessions TeachingSession[]
-
   @@index([tutorId])
   @@index([classId])
   @@index([studentId])
+  @@index([privatePackageId])
   @@index([status])
   @@index([programId])
   @@index([isPattern])
@@ -370,6 +384,9 @@ model TeachingSession {
   endTime               DateTime?
   classId               String?
   studentId             String?
+  // Copied from the source Schedule (or selected for a direct private session)
+  // so quota deduction remains deterministic even after the schedule changes.
+  privatePackageId      String?
   subjectId             String?
   programId             String?
   mode                  String    @default("OFFLINE")
@@ -396,6 +413,7 @@ model TeachingSession {
   tutor             Tutor                   @relation(fields: [tutorId], references: [id], onDelete: Cascade)
   class             Class?                  @relation(fields: [classId], references: [id], onDelete: SetNull)
   student           Student?                @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  privatePackage    PrivatePackage?         @relation("PrivatePackageSessions", fields: [privatePackageId], references: [id], onDelete: SetNull)
   subject           Subject?                @relation(fields: [subjectId], references: [id], onDelete: SetNull)
   program           Program?                @relation(fields: [programId], references: [id], onDelete: SetNull)
   attendanceRecords AttendanceRecord[]
@@ -409,6 +427,7 @@ model TeachingSession {
   @@index([status])
   @@index([classId])
   @@index([studentId])
+  @@index([privatePackageId])
   @@index([programId])
 }
 
@@ -478,6 +497,8 @@ model PrivatePackage {
   student Student               @relation(fields: [studentId], references: [id], onDelete: Cascade)
   program Program?              @relation(fields: [programId], references: [id], onDelete: SetNull)
   usages  PrivatePackageUsage[]
+  schedules Schedule[]          @relation("PrivatePackageSchedules")
+  sessions  TeachingSession[]   @relation("PrivatePackageSessions")
 
   @@index([studentId])
   @@index([status])
