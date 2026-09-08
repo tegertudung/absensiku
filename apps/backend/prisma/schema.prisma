@@ -15,18 +15,20 @@ datasource db {
 // ============================================
 
 model User {
-  id           String    @id @default(uuid())
-  email        String    @unique
-  passwordHash String
-  role         String // 'ADMIN' | 'TENTOR'
-  isActive     Boolean   @default(true)
+  id                 String    @id @default(uuid())
+  email              String    @unique
+  passwordHash       String
+  role               String // 'ADMIN' | 'TENTOR'
+  isActive           Boolean   @default(true)
+  isPrimaryAdmin     Boolean   @default(false)
+  deletedAt          DateTime?
   // Set whenever an admin sets this account's password for it (new tutor
   // account created with the "123456" default, or an existing one reset) —
   // cleared once the user successfully changes their own password.
   mustChangePassword Boolean   @default(false)
-  lastLogin    DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  lastLogin          DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   tutor             Tutor?
   parent            Parent?
@@ -34,6 +36,7 @@ model User {
 
   @@index([email])
   @@index([role])
+  @@index([deletedAt])
 }
 
 // ============================================
@@ -320,44 +323,46 @@ model StudentProgram {
 // ============================================
 
 model Schedule {
-  id          String    @id @default(uuid())
-  tutorId     String?
-  sessionType String // 'REGULAR' | 'PRIVATE'
-  classId     String?
-  studentId   String?
+  id                 String    @id @default(uuid())
+  tutorId            String?
+  sessionType        String // 'REGULAR' | 'PRIVATE'
+  classId            String?
+  studentId          String?
   // PRIVATE schedules are pinned to the package selected at creation time.
   // This avoids choosing an arbitrary active package when the session is completed.
-  privatePackageId String?
-  subjectId   String?
-  programId   String?
-  dayOfWeek   Int // 0=Sunday, 6=Saturday
-  startTime   DateTime
-  endTime     DateTime
-  startDate   DateTime
-  endDate     DateTime?
-  status      String    @default("ACTIVE") // 'ACTIVE' | 'INACTIVE' | 'CANCELLED'
-  mode        String    @default("OFFLINE") // 'ONLINE' | 'OFFLINE' — Tentor Jadwal mockup
-  location    String? // free-text, e.g. "Cabang Sudirman"; only meaningful when mode=OFFLINE
-  notes       String?
-  isPattern   Boolean   @default(false)
+  privatePackageId   String?
+  subjectId          String?
+  programId          String?
+  dayOfWeek          Int // 0=Sunday, 6=Saturday
+  startTime          DateTime
+  endTime            DateTime
+  startDate          DateTime
+  endDate            DateTime?
+  status             String    @default("ACTIVE") // 'ACTIVE' | 'INACTIVE' | 'CANCELLED'
+  mode               String    @default("OFFLINE") // 'ONLINE' | 'OFFLINE' — Tentor Jadwal mockup
+  location           String? // free-text, e.g. "Cabang Sudirman"; only meaningful when mode=OFFLINE
+  notes              String?
+  isPattern          Boolean   @default(false)
   // A CLASS_BASED weekly pattern remains a Schedule row. Generated rows are
   // real, one-off occurrences linked back to that pattern, so changing one
   // meeting never rewrites the template or its siblings.
-  patternId   String?
-  occurrenceDate DateTime?
+  patternId          String?
+  occurrenceDate     DateTime?
   occurrenceSequence Int?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  tutor    Tutor?            @relation(fields: [tutorId], references: [id], onDelete: Cascade)
-  class    Class?            @relation(fields: [classId], references: [id], onDelete: SetNull)
-  student  Student?          @relation(fields: [studentId], references: [id], onDelete: SetNull)
-  privatePackage PrivatePackage? @relation("PrivatePackageSchedules", fields: [privatePackageId], references: [id], onDelete: SetNull)
-  subject  Subject?          @relation(fields: [subjectId], references: [id], onDelete: SetNull)
-  program  Program?          @relation(fields: [programId], references: [id], onDelete: SetNull)
-  pattern  Schedule?         @relation("PatternOccurrences", fields: [patternId], references: [id], onDelete: SetNull)
-  occurrences Schedule[]     @relation("PatternOccurrences")
-  sessions TeachingSession[]
+  tutor          Tutor?            @relation(fields: [tutorId], references: [id], onDelete: Cascade)
+  class          Class?            @relation(fields: [classId], references: [id], onDelete: SetNull)
+  student        Student?          @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  privatePackage PrivatePackage?   @relation("PrivatePackageSchedules", fields: [privatePackageId], references: [id], onDelete: SetNull)
+  subject        Subject?          @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  program        Program?          @relation(fields: [programId], references: [id], onDelete: SetNull)
+  pattern        Schedule?         @relation("PatternOccurrences", fields: [patternId], references: [id], onDelete: SetNull)
+  occurrences    Schedule[]        @relation("PatternOccurrences")
+  sessions       TeachingSession[]
+
+  @@unique([patternId, occurrenceDate, startTime])
   @@index([tutorId])
   @@index([classId])
   @@index([studentId])
@@ -366,7 +371,6 @@ model Schedule {
   @@index([programId])
   @@index([isPattern])
   @@index([patternId, occurrenceDate])
-  @@unique([patternId, occurrenceDate, startTime])
 }
 
 // ============================================
@@ -494,11 +498,11 @@ model PrivatePackage {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  student Student               @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  program Program?              @relation(fields: [programId], references: [id], onDelete: SetNull)
-  usages  PrivatePackageUsage[]
-  schedules Schedule[]          @relation("PrivatePackageSchedules")
-  sessions  TeachingSession[]   @relation("PrivatePackageSessions")
+  student   Student               @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  program   Program?              @relation(fields: [programId], references: [id], onDelete: SetNull)
+  usages    PrivatePackageUsage[]
+  schedules Schedule[]            @relation("PrivatePackageSchedules")
+  sessions  TeachingSession[]     @relation("PrivatePackageSessions")
 
   @@index([studentId])
   @@index([status])

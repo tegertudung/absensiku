@@ -28,6 +28,7 @@ import parentsRouter from "./api/parents";
 import parentPortalRouter from "./api/parentPortal";
 import studentLettersRouter from "./api/studentLetters";
 import tutorMascotsRouter from "./api/tutorMascots";
+import adminUsersRouter from "./api/adminUsers";
 import { SETTINGS_UPLOAD_ROOT } from "./middleware/settingsUpload";
 
 const app = express();
@@ -99,6 +100,7 @@ app.use("/api/parents", parentsRouter);
 app.use("/api/parent", parentPortalRouter);
 app.use("/api/student-letters", studentLettersRouter);
 app.use("/api/tutor-mascots", tutorMascotsRouter);
+app.use("/api/admin", adminUsersRouter);
 
 // 404 handler
 app.use((req, res) => {

@@ -1,9 +1,10 @@
-import { create } from 'zustand';
+import { create } from "zustand";
 
 export interface AuthUser {
   id: string;
   email: string;
-  role: 'ADMIN' | 'TENTOR' | 'PARENT';
+  role: "ADMIN" | "TENTOR" | "PARENT";
+  isPrimaryAdmin?: boolean;
   mustChangePassword?: boolean;
 }
 
@@ -23,8 +24,8 @@ export const useAuthStore = create<AuthState>((set) => ({
   isHydrated: false,
 
   setAuth: (user, token) => {
-    localStorage.setItem('absensiku_token', token);
-    localStorage.setItem('absensiku_user', JSON.stringify(user));
+    localStorage.setItem("absensiku_token", token);
+    localStorage.setItem("absensiku_user", JSON.stringify(user));
     set({ user, token });
   },
 
@@ -34,22 +35,22 @@ export const useAuthStore = create<AuthState>((set) => ({
     set((state) => {
       if (!state.user) return state;
       const user = { ...state.user, ...patch };
-      localStorage.setItem('absensiku_user', JSON.stringify(user));
+      localStorage.setItem("absensiku_user", JSON.stringify(user));
       return { user };
     });
   },
 
   logout: () => {
-    localStorage.removeItem('absensiku_token');
-    localStorage.removeItem('absensiku_user');
+    localStorage.removeItem("absensiku_token");
+    localStorage.removeItem("absensiku_user");
     set({ user: null, token: null });
   },
 
   // Restore session from localStorage on app load (client-side only).
   hydrate: () => {
-    if (typeof window === 'undefined') return;
-    const token = localStorage.getItem('absensiku_token');
-    const userRaw = localStorage.getItem('absensiku_user');
+    if (typeof window === "undefined") return;
+    const token = localStorage.getItem("absensiku_token");
+    const userRaw = localStorage.getItem("absensiku_user");
     if (token && userRaw) {
       try {
         const user = JSON.parse(userRaw) as AuthUser;

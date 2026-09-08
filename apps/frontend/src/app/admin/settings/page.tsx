@@ -6,8 +6,17 @@ import Modal from "@/components/Modal";
 import MascotImage from "@/components/MascotImage";
 import { IconTrash } from "@/components/icons";
 import { useSystemIdentityStore } from "@/store/systemIdentityStore";
+import { useAuthStore } from "@/store/authStore";
 type Settings = Record<string, string>;
-type Tab = "identity" | "operations" | "document" | "tutorDisplay";
+type Tab = "identity" | "operations" | "document" | "tutorDisplay" | "admins";
+type AdminUser = {
+  id: string;
+  email: string;
+  isPrimaryAdmin: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
 type Mascot = {
   id: string;
   name: string;
@@ -117,9 +126,12 @@ const nav: [Tab, string][] = [
   ["operations", "Operasional"],
   ["document", "Slip Honor"],
   ["tutorDisplay", "Tampilan Tentor"],
+  ["admins", "Kelola Admin"],
 ];
 export default function SettingsPage() {
   const refresh = useSystemIdentityStore((s) => s.refresh);
+  const currentUser = useAuthStore((s) => s.user);
+  const isPrimaryAdmin = currentUser?.isPrimaryAdmin === true;
   const [tab, setTab] = useState<Tab>("identity"),
     [settings, setSettings] = useState<Settings>(initial),
     [saving, setSaving] = useState(false),
@@ -141,7 +153,21 @@ export default function SettingsPage() {
       useState<MascotDisplayConfig>(DEFAULT_MASCOT_DISPLAY_CONFIG),
     [savedMascotDisplayConfig, setSavedMascotDisplayConfig] =
       useState<MascotDisplayConfig>(DEFAULT_MASCOT_DISPLAY_CONFIG),
-    [mascotConfigSaving, setMascotConfigSaving] = useState(false);
+    [mascotConfigSaving, setMascotConfigSaving] = useState(false),
+    [adminUsers, setAdminUsers] = useState<AdminUser[]>([]),
+    [adminUsersLoading, setAdminUsersLoading] = useState(false),
+    [adminBusyId, setAdminBusyId] = useState<string | null>(null),
+    [addAdminOpen, setAddAdminOpen] = useState(false),
+    [resetAdminTarget, setResetAdminTarget] = useState<AdminUser | null>(null),
+    [deleteAdminTarget, setDeleteAdminTarget] = useState<AdminUser | null>(
+      null,
+    ),
+    [adminFormError, setAdminFormError] = useState(""),
+    [adminForm, setAdminForm] = useState({
+      email: "",
+      password: "",
+      confirmPassword: "",
+    });
   const logoRef = useRef<HTMLInputElement>(null),
     signatureRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -180,6 +206,20 @@ export default function SettingsPage() {
   };
   useEffect(() => {
     if (tab === "tutorDisplay") void loadMascots();
+  }, [tab]);
+  const loadAdminUsers = async () => {
+    setAdminUsersLoading(true);
+    try {
+      const response = await api.get("/admin/users");
+      setAdminUsers(response.data.data);
+    } catch (error) {
+      setMessage("Gagal memuat akun Admin.");
+    } finally {
+      setAdminUsersLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (tab === "admins") void loadAdminUsers();
   }, [tab]);
   async function save(
     path: "identity" | "session" | "document",
@@ -329,6 +369,89 @@ export default function SettingsPage() {
       setMascotConfigSaving(false);
     }
   }
+  function closeAdminModal() {
+    setAddAdminOpen(false);
+    setResetAdminTarget(null);
+    setDeleteAdminTarget(null);
+    setAdminFormError("");
+    setAdminForm({ email: "", password: "", confirmPassword: "" });
+  }
+  function validateAdminPassword() {
+    if (adminForm.password.length < 8) {
+      setAdminFormError("Password minimal 8 karakter.");
+      return false;
+    }
+    if (adminForm.password !== adminForm.confirmPassword) {
+      setAdminFormError("Konfirmasi password tidak cocok.");
+      return false;
+    }
+    return true;
+  }
+  async function createAdmin() {
+    const email = adminForm.email.trim();
+    if (!email) {
+      return setAdminFormError("Email wajib diisi.");
+    }
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      return setAdminFormError("Email tidak valid.");
+    }
+    if (!validateAdminPassword()) return;
+    setAdminBusyId("create");
+    setAdminFormError("");
+    try {
+      await api.post("/admin/users", { ...adminForm, email });
+      closeAdminModal();
+      await loadAdminUsers();
+      setMessage("Akun Admin berhasil ditambahkan.");
+    } catch (error) {
+      setAdminFormError(
+        (error as { response?: { data?: { message?: string } } }).response?.data
+          ?.message || "Gagal menambahkan akun Admin.",
+      );
+    } finally {
+      setAdminBusyId(null);
+    }
+  }
+  async function resetAdminPassword() {
+    if (!resetAdminTarget || !validateAdminPassword()) return;
+    setAdminBusyId(resetAdminTarget.id);
+    setAdminFormError("");
+    try {
+      await api.patch(`/admin/users/${resetAdminTarget.id}/password`, {
+        password: adminForm.password,
+        confirmPassword: adminForm.confirmPassword,
+      });
+      closeAdminModal();
+      setMessage("Password Admin berhasil diperbarui.");
+    } catch (error) {
+      setAdminFormError(
+        (error as { response?: { data?: { message?: string } } }).response?.data
+          ?.message || "Gagal memperbarui password Admin.",
+      );
+    } finally {
+      setAdminBusyId(null);
+    }
+  }
+  async function deleteAdmin() {
+    if (!deleteAdminTarget) return;
+    setAdminBusyId(deleteAdminTarget.id);
+    try {
+      await api.delete(`/admin/users/${deleteAdminTarget.id}`);
+      setAdminUsers((users) =>
+        users.filter((user) => user.id !== deleteAdminTarget.id),
+      );
+      closeAdminModal();
+      setMessage("Akun Admin berhasil dihapus.");
+    } catch (error) {
+      closeAdminModal();
+      setMessage(
+        (error as { response?: { data?: { message?: string } } }).response?.data
+          ?.message || "Gagal menghapus akun Admin.",
+      );
+    } finally {
+      setAdminBusyId(null);
+    }
+  }
   const mascotConfigChanged =
     mascotConfigSignature(mascotDisplayConfig) !==
     mascotConfigSignature(savedMascotDisplayConfig);
@@ -358,15 +481,17 @@ export default function SettingsPage() {
       )}
       <div className="grid gap-5 lg:grid-cols-[190px_minmax(0,1fr)]">
         <nav className="h-fit rounded-lg border border-gray-200 bg-white p-2">
-          {nav.map(([id, label]) => (
-            <button
-              key={id}
-              onClick={() => setTab(id)}
-              className={`flex w-full rounded-md px-3 py-2.5 text-left text-sm ${tab === id ? "bg-navy-50 font-medium text-navy-900" : "text-gray-600 hover:bg-gray-50"}`}
-            >
-              {label}
-            </button>
-          ))}
+          {nav
+            .filter(([id]) => id !== "admins" || isPrimaryAdmin)
+            .map(([id, label]) => (
+              <button
+                key={id}
+                onClick={() => setTab(id)}
+                className={`flex w-full rounded-md px-3 py-2.5 text-left text-sm ${tab === id ? "bg-navy-50 font-medium text-navy-900" : "text-gray-600 hover:bg-gray-50"}`}
+              >
+                {label}
+              </button>
+            ))}
         </nav>
         <main>
           {tab === "identity" && (
@@ -519,6 +644,124 @@ export default function SettingsPage() {
                   })
                 }
               />
+            </section>
+          )}
+          {tab === "admins" && isPrimaryAdmin && (
+            <section className="max-w-4xl rounded-lg border bg-white p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-base font-semibold">Kelola Admin</h2>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Kelola akun tambahan yang dapat mengakses dashboard Admin.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAdminFormError("");
+                    setAddAdminOpen(true);
+                  }}
+                  className="rounded-md bg-navy-900 px-3 py-2 text-xs font-medium text-white hover:bg-navy-800"
+                >
+                  + Tambah Admin
+                </button>
+              </div>
+              <div className="mt-5 overflow-x-auto rounded-md border border-gray-200">
+                <table className="w-full min-w-[620px] text-left text-sm">
+                  <thead className="bg-slate-50 text-xs text-gray-500">
+                    <tr>
+                      <th className="px-4 py-3 font-medium">Email</th>
+                      <th className="px-4 py-3 font-medium">Status</th>
+                      <th className="px-4 py-3 font-medium">Dibuat</th>
+                      <th className="px-4 py-3 text-right font-medium">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {adminUsersLoading ? (
+                      <tr>
+                        <td
+                          colSpan={4}
+                          className="px-4 py-8 text-center text-sm text-gray-500"
+                        >
+                          Memuat akun Admin...
+                        </td>
+                      </tr>
+                    ) : adminUsers.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={4}
+                          className="px-4 py-8 text-center text-sm text-gray-500"
+                        >
+                          Belum ada akun Admin.
+                        </td>
+                      </tr>
+                    ) : (
+                      adminUsers.map((admin) => {
+                        const isCurrentUser = admin.id === currentUser?.id;
+                        return (
+                          <tr key={admin.id}>
+                            <td className="px-4 py-3 font-medium text-gray-900">
+                              {admin.email}
+                              {isCurrentUser && (
+                                <span className="ml-2 rounded-full bg-navy-50 px-2 py-0.5 text-[10px] font-medium text-navy-800">
+                                  Anda
+                                </span>
+                              )}
+                              {admin.isPrimaryAdmin && (
+                                <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+                                  Admin Utama
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              <span
+                                className={`rounded-full px-2 py-1 text-xs font-medium ${admin.isActive ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-600"}`}
+                              >
+                                {admin.isActive ? "Aktif" : "Nonaktif"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-gray-500">
+                              {new Date(admin.createdAt).toLocaleDateString(
+                                "id-ID",
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              {!admin.isPrimaryAdmin && !isCurrentUser && (
+                                <div className="inline-flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={adminBusyId === admin.id}
+                                    onClick={() => {
+                                      setAdminFormError("");
+                                      setAdminForm({
+                                        email: "",
+                                        password: "",
+                                        confirmPassword: "",
+                                      });
+                                      setResetAdminTarget(admin);
+                                    }}
+                                    className="text-xs font-medium text-navy-800 hover:underline disabled:opacity-50"
+                                  >
+                                    Reset Password
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={adminBusyId === admin.id}
+                                    onClick={() => setDeleteAdminTarget(admin)}
+                                    className="text-xs font-medium text-red-700 hover:underline disabled:opacity-50"
+                                  >
+                                    Hapus
+                                  </button>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </section>
           )}
           {tab === "tutorDisplay" && (
@@ -903,7 +1146,162 @@ export default function SettingsPage() {
           </div>
         </Modal>
       )}
+      {addAdminOpen && (
+        <AdminPasswordModal
+          title="Tambah Admin"
+          form={adminForm}
+          error={adminFormError}
+          saving={adminBusyId === "create"}
+          submitLabel="Tambah Admin"
+          onClose={() => !adminBusyId && closeAdminModal()}
+          onChange={setAdminForm}
+          onSubmit={createAdmin}
+          showEmail
+        />
+      )}
+      {resetAdminTarget && (
+        <AdminPasswordModal
+          title="Reset Password Admin"
+          accountEmail={resetAdminTarget.email}
+          form={adminForm}
+          error={adminFormError}
+          saving={adminBusyId === resetAdminTarget.id}
+          submitLabel="Simpan Password Baru"
+          onClose={() => !adminBusyId && closeAdminModal()}
+          onChange={setAdminForm}
+          onSubmit={resetAdminPassword}
+        />
+      )}
+      {deleteAdminTarget && (
+        <Modal
+          title="Hapus akun Admin?"
+          onClose={() => !adminBusyId && closeAdminModal()}
+          className="max-w-sm"
+        >
+          <p className="text-sm text-gray-600">
+            Akun tidak lagi dapat masuk ke dashboard Admin. Riwayat aktivitasnya
+            tetap disimpan.
+          </p>
+          <div className="mt-5 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={closeAdminModal}
+              className="rounded-md border px-3 py-2 text-xs"
+            >
+              Batal
+            </button>
+            <button
+              type="button"
+              disabled={adminBusyId === deleteAdminTarget.id}
+              onClick={deleteAdmin}
+              className="rounded-md bg-red-600 px-3 py-2 text-xs font-medium text-white disabled:opacity-60"
+            >
+              {adminBusyId === deleteAdminTarget.id
+                ? "Menghapus..."
+                : "Hapus Admin"}
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
+  );
+}
+function AdminPasswordModal({
+  title,
+  accountEmail,
+  form,
+  error,
+  saving,
+  submitLabel,
+  onClose,
+  onChange,
+  onSubmit,
+  showEmail = false,
+}: {
+  title: string;
+  accountEmail?: string;
+  form: { email: string; password: string; confirmPassword: string };
+  error: string;
+  saving: boolean;
+  submitLabel: string;
+  onClose: () => void;
+  onChange: (form: {
+    email: string;
+    password: string;
+    confirmPassword: string;
+  }) => void;
+  onSubmit: () => void;
+  showEmail?: boolean;
+}) {
+  return (
+    <Modal title={title} onClose={onClose} className="max-w-md">
+      <div className="space-y-4">
+        {accountEmail && (
+          <p className="text-sm text-gray-600">
+            Akun:{" "}
+            <span className="font-medium text-gray-900">{accountEmail}</span>
+          </p>
+        )}
+        {showEmail && (
+          <label className="block text-xs font-medium text-gray-700">
+            Email
+            <input
+              type="email"
+              value={form.email}
+              onChange={(event) =>
+                onChange({ ...form, email: event.target.value })
+              }
+              className="mt-1.5 h-10 w-full rounded-md border border-gray-300 px-3 text-sm"
+            />
+          </label>
+        )}
+        <label className="block text-xs font-medium text-gray-700">
+          {showEmail ? "Password Awal" : "Password Baru"}
+          <input
+            type="password"
+            value={form.password}
+            onChange={(event) =>
+              onChange({ ...form, password: event.target.value })
+            }
+            className="mt-1.5 h-10 w-full rounded-md border border-gray-300 px-3 text-sm"
+          />
+        </label>
+        <label className="block text-xs font-medium text-gray-700">
+          {showEmail ? "Konfirmasi Password" : "Konfirmasi Password Baru"}
+          <input
+            type="password"
+            value={form.confirmPassword}
+            onChange={(event) =>
+              onChange({ ...form, confirmPassword: event.target.value })
+            }
+            className="mt-1.5 h-10 w-full rounded-md border border-gray-300 px-3 text-sm"
+          />
+        </label>
+        {error && (
+          <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            {error}
+          </p>
+        )}
+        <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">
+          <button
+            type="button"
+            disabled={saving}
+            onClick={onClose}
+            className="rounded-md border px-3 py-2 text-xs"
+          >
+            Batal
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={onSubmit}
+            className="rounded-md bg-navy-900 px-3 py-2 text-xs font-medium text-white disabled:opacity-60"
+          >
+            {saving ? "Menyimpan..." : submitLabel}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 function Save({ saving, onClick }: { saving: boolean; onClick: () => void }) {

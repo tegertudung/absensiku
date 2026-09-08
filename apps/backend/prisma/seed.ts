@@ -3,13 +3,56 @@ import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
+async function ensurePrimaryAdmin() {
+  const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  const password = process.env.ADMIN_PASSWORD;
+  if (!email || !password) {
+    console.warn(
+      "ADMIN_EMAIL dan ADMIN_PASSWORD belum diatur; bootstrap Admin Utama dilewati.",
+    );
+    return;
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.user.updateMany({
+      where: { role: "ADMIN", isPrimaryAdmin: true, email: { not: email } },
+      data: { isPrimaryAdmin: false },
+    });
+    const existing = await tx.user.findUnique({ where: { email } });
+    if (existing) {
+      await tx.user.update({
+        where: { id: existing.id },
+        data: {
+          role: "ADMIN",
+          isPrimaryAdmin: true,
+          isActive: true,
+          deletedAt: null,
+        },
+      });
+      return;
+    }
+    await tx.user.create({
+      data: {
+        email,
+        passwordHash: await bcrypt.hash(password, 10),
+        role: "ADMIN",
+        isPrimaryAdmin: true,
+        isActive: true,
+      },
+    });
+  });
+}
+
 async function findOrCreateStudent(name: string) {
   const existing = await prisma.student.findFirst({ where: { name } });
   if (existing) return existing;
-  return prisma.student.create({ data: { name, status: "ACTIVE" } });
+  return prisma.student.create({
+    data: { studentCode: "SISWA-CONTOH", name, status: "ACTIVE" },
+  });
 }
 
 async function main() {
+  await ensurePrimaryAdmin();
   console.log("🌱 Seeding development data...\n");
 
   // --- Subject & Class ---
@@ -58,6 +101,7 @@ async function main() {
   if (!tutor) {
     tutor = await prisma.tutor.create({
       data: {
+        tutorCode: "TENTOR-001",
         userId: tutorUser.id,
         name: "Budi Tentor",
         email: tutorEmail,
