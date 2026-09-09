@@ -13,8 +13,12 @@ import {
   deleteTutor,
   getOwnTutorProfile,
   resetTutorPassword,
+  restoreTutor,
 } from "../services/tutorService";
-import { previewTutorImport, commitTutorImport } from "../services/tutorImportService";
+import {
+  previewTutorImport,
+  commitTutorImport,
+} from "../services/tutorImportService";
 
 const router = Router();
 
@@ -66,7 +70,10 @@ router.post(
         details: parsed.error.flatten().fieldErrors,
       });
     try {
-      const result = await commitTutorImport(parsed.data.rows);
+      const result = await commitTutorImport(
+        parsed.data.rows,
+        req.user!.userId,
+      );
       res.json({ success: true, data: result });
     } catch (err) {
       handleError(err, res);
@@ -130,13 +137,13 @@ router.post(
     }
 
     try {
-      const tutor = await createTutor({
+      const result = await createTutor({
         ...parsed.data,
         hireDate: parsed.data.hireDate
           ? new Date(parsed.data.hireDate)
           : undefined,
       });
-      res.status(201).json({ success: true, data: tutor });
+      res.status(201).json({ success: true, data: result });
     } catch (err) {
       handleError(err, res);
     }
@@ -193,17 +200,15 @@ const updateSchema = z.object({
     .optional(),
 });
 
-const resetPasswordSchema = z.object({
-  newPassword: z.string().min(6, "Password minimal 6 karakter"),
-});
+const restoreSchema = createSchema.omit({ email: true });
 
-// PATCH /api/tutors/:id/password — admin recovery only; never returns a hash.
-router.patch(
-  "/:id/password",
+// POST /api/tutors/:id/restore — reactivates the same archived User/Tutor.
+router.post(
+  "/:id/restore",
   requireAuth,
   requireRole("ADMIN"),
   async (req: Request, res: Response) => {
-    const parsed = resetPasswordSchema.safeParse(req.body);
+    const parsed = restoreSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({
         error: "Validation error",
@@ -211,12 +216,29 @@ router.patch(
       });
     }
     try {
-      await resetTutorPassword(
-        req.params.id,
-        parsed.data.newPassword,
-        req.user!.userId,
-      );
-      res.json({ success: true, message: "Password tentor berhasil direset" });
+      const result = await restoreTutor(req.params.id, req.user!.userId, {
+        ...parsed.data,
+        hireDate: parsed.data.hireDate
+          ? new Date(parsed.data.hireDate)
+          : undefined,
+      });
+      res.json({ success: true, data: result });
+    } catch (err) {
+      handleError(err, res);
+    }
+  },
+);
+
+// PATCH /api/tutors/:id/password — Admin-only one-time credential reset.
+// The server generates the password; callers can never choose or recover it.
+router.patch(
+  "/:id/password",
+  requireAuth,
+  requireRole("ADMIN"),
+  async (req: Request, res: Response) => {
+    try {
+      const result = await resetTutorPassword(req.params.id, req.user!.userId);
+      res.json({ success: true, data: result });
     } catch (err) {
       handleError(err, res);
     }

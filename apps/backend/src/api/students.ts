@@ -5,6 +5,7 @@ import { handleError } from "../utils/errors";
 import {
   createStudent,
   listStudents,
+  listTutorStudentDirectory,
   getStudentById,
   updateStudent,
   setStudentStatus,
@@ -12,7 +13,10 @@ import {
 } from "../services/studentService";
 import { listEnrollmentsForStudent } from "../services/enrollmentService";
 import { parseUploadedFile } from "../middleware/fileUpload";
-import { previewStudentImport, commitStudentImport } from "../services/studentImportService";
+import {
+  previewStudentImport,
+  commitStudentImport,
+} from "../services/studentImportService";
 
 const router = Router();
 router.use(requireAuth, requireRole("ADMIN", "TENTOR"));
@@ -88,7 +92,14 @@ const createSchema = z.object({
   school: z.string().trim().max(200).optional(),
   schoolClass: z.string().trim().max(100).optional(),
   classId: z.string().uuid().nullable().optional(),
-  programEnrollments: z.array(z.object({ programId: z.string().uuid(), classId: z.string().uuid().nullable().optional() })).optional(),
+  programEnrollments: z
+    .array(
+      z.object({
+        programId: z.string().uuid(),
+        classId: z.string().uuid().nullable().optional(),
+      }),
+    )
+    .optional(),
 });
 
 // POST /api/students
@@ -99,12 +110,10 @@ router.post(
   async (req: Request, res: Response) => {
     const parsed = createSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res
-        .status(400)
-        .json({
-          error: "Validation error",
-          details: parsed.error.flatten().fieldErrors,
-        });
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
     }
     try {
       const student = await createStudent(parsed.data);
@@ -115,11 +124,15 @@ router.post(
   },
 );
 
-// GET /api/students — also readable by TENTOR (needed for the "Tambah Privat"
-// student search when a tentor creates their own private schedule).
-router.get("/", requireAuth, async (_req: Request, res: Response) => {
+// GET /api/students — role-aware: Admin keeps the administrative response;
+// Tentor gets only the minimal directory needed by direct private sessions.
+router.get("/", requireAuth, async (req: Request, res: Response) => {
   try {
-    res.json({ success: true, data: await listStudents() });
+    const students =
+      req.user!.role === "ADMIN"
+        ? await listStudents()
+        : await listTutorStudentDirectory();
+    res.json({ success: true, data: students });
   } catch (err) {
     handleError(err, res);
   }
@@ -165,7 +178,14 @@ const updateSchema = z.object({
   nis: z.string().trim().max(100).optional(),
   school: z.string().trim().max(200).optional(),
   schoolClass: z.string().trim().max(100).optional(),
-  programEnrollments: z.array(z.object({ programId: z.string().uuid(), classId: z.string().uuid().nullable().optional() })).optional(),
+  programEnrollments: z
+    .array(
+      z.object({
+        programId: z.string().uuid(),
+        classId: z.string().uuid().nullable().optional(),
+      }),
+    )
+    .optional(),
 });
 
 // PUT /api/students/:id
@@ -176,12 +196,10 @@ router.put(
   async (req: Request, res: Response) => {
     const parsed = updateSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res
-        .status(400)
-        .json({
-          error: "Validation error",
-          details: parsed.error.flatten().fieldErrors,
-        });
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
     }
     try {
       res.json({
@@ -206,12 +224,10 @@ router.patch(
   async (req: Request, res: Response) => {
     const parsed = statusSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res
-        .status(400)
-        .json({
-          error: "Validation error",
-          details: parsed.error.flatten().fieldErrors,
-        });
+      return res.status(400).json({
+        error: "Validation error",
+        details: parsed.error.flatten().fieldErrors,
+      });
     }
     try {
       res.json({

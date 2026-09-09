@@ -41,7 +41,23 @@ export default function AdminTutorsPage() {
     [deleteError, setDeleteError] = useState(""),
     [deleting, setDeleting] = useState(false),
     [deleteSuccess, setDeleteSuccess] = useState(""),
-    [importOpen, setImportOpen] = useState(false);
+    [importOpen, setImportOpen] = useState(false),
+    [createdAccount, setCreatedAccount] = useState<{
+      email: string;
+      temporaryPassword: string;
+      action: "CREATED" | "RESTORED" | "RESET";
+    } | null>(null),
+    [passwordCopied, setPasswordCopied] = useState(false),
+    [restoreCandidate, setRestoreCandidate] = useState<{
+      tutorId: string;
+      email: string;
+      profile: typeof initial;
+    } | null>(null),
+    [restoring, setRestoring] = useState(false),
+    [restoreError, setRestoreError] = useState(""),
+    [resetTarget, setResetTarget] = useState<Tutor | null>(null),
+    [resettingPassword, setResettingPassword] = useState(false),
+    [resetError, setResetError] = useState("");
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -94,14 +110,58 @@ export default function AdminTutorsPage() {
       return setFormError("Pilih minimal satu mata pelajaran.");
     setSaving(true);
     try {
-      await api.post("/tutors", form);
+      const response = await api.post("/tutors", form);
       setOpen(false);
+      setCreatedAccount({
+        email: response.data.data.tutor.user?.email || form.email,
+        temporaryPassword: response.data.data.temporaryPassword,
+        action: "CREATED",
+      });
+      setPasswordCopied(false);
       setForm(initial);
       await load();
     } catch (err: any) {
-      setFormError(err.response?.data?.message || "Gagal menambah tentor.");
+      const data = err.response?.data;
+      if (data?.code === "TUTOR_ARCHIVED" && data?.details?.tutorId) {
+        setRestoreCandidate({
+          tutorId: data.details.tutorId,
+          email: form.email,
+          profile: { ...form },
+        });
+        setRestoreError("");
+        setOpen(false);
+      } else {
+        setFormError(data?.message || "Gagal menambah tentor.");
+      }
     } finally {
       setSaving(false);
+    }
+  }
+  async function restoreArchivedTutor() {
+    if (!restoreCandidate) return;
+    setRestoring(true);
+    setRestoreError("");
+    try {
+      const { email: _email, ...profile } = restoreCandidate.profile;
+      const response = await api.post(
+        `/tutors/${restoreCandidate.tutorId}/restore`,
+        profile,
+      );
+      setCreatedAccount({
+        email: response.data.data.tutor.user?.email || restoreCandidate.email,
+        temporaryPassword: response.data.data.temporaryPassword,
+        action: "RESTORED",
+      });
+      setPasswordCopied(false);
+      setRestoreCandidate(null);
+      setForm(initial);
+      await load();
+    } catch (err: any) {
+      setRestoreError(
+        err.response?.data?.message || "Gagal memulihkan akun Tentor.",
+      );
+    } finally {
+      setRestoring(false);
     }
   }
   async function removeTutor() {
@@ -119,6 +179,27 @@ export default function AdminTutorsPage() {
       setDeleteError(err.response?.data?.message || "Gagal menghapus tentor.");
     } finally {
       setDeleting(false);
+    }
+  }
+  async function resetTutorPassword() {
+    if (!resetTarget) return;
+    setResettingPassword(true);
+    setResetError("");
+    try {
+      const response = await api.patch(`/tutors/${resetTarget.id}/password`);
+      setCreatedAccount({
+        email: resetTarget.user.email,
+        temporaryPassword: response.data.data.temporaryPassword,
+        action: "RESET",
+      });
+      setPasswordCopied(false);
+      setResetTarget(null);
+    } catch (err: any) {
+      setResetError(
+        err.response?.data?.message || "Gagal mereset password Tentor.",
+      );
+    } finally {
+      setResettingPassword(false);
     }
   }
   const visible = useMemo(
@@ -221,13 +302,27 @@ export default function AdminTutorsPage() {
                         </td>
                         <td className="p-3 text-right">
                           <AdminTableActions
-                            ariaLabel={`Aksi untuk ${t.name}`}
+                            ariaLabel={`Menu aksi untuk ${t.name}`}
                             detailHref={`/admin/tutors/${t.id}`}
                             editHref={`/admin/tutors/${t.id}/edit`}
-                            onDelete={() => {
-                              setDeleteError("");
-                              setRemoving(t);
-                            }}
+                            overflowActions={[
+                              {
+                                label: "Reset Password",
+                                onClick: () => {
+                                  setResetError("");
+                                  setResetTarget(t);
+                                },
+                              },
+                              {
+                                label: "Hapus Tentor",
+                                tone: "destructive",
+                                dividerBefore: true,
+                                onClick: () => {
+                                  setDeleteError("");
+                                  setRemoving(t);
+                                },
+                              },
+                            ]}
                           />
                         </td>
                       </tr>
@@ -311,9 +406,8 @@ export default function AdminTutorsPage() {
               </p>
             </div>
             <p className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
-              Password akun akan otomatis dibuat sebagai{" "}
-              <span className="font-semibold">123456</span>. Tentor akan
-              diminta mengganti password ini saat login pertama kali.
+              Sistem akan membuat password sementara acak dan menampilkannya
+              satu kali setelah akun berhasil dibuat.
             </p>
             {formError && <p className="text-sm text-red-600">{formError}</p>}
             <div className="flex justify-end gap-2">
@@ -332,6 +426,124 @@ export default function AdminTutorsPage() {
               </button>
             </div>
           </form>
+        </Modal>
+      )}
+      {createdAccount && (
+        <Modal
+          title={
+            createdAccount.action === "RESTORED"
+              ? "Tentor berhasil dipulihkan"
+              : createdAccount.action === "RESET"
+                ? "Password berhasil direset"
+                : "Akun tentor berhasil dibuat"
+          }
+          onClose={() => setCreatedAccount(null)}
+        >
+          <div className="space-y-4 text-sm">
+            <p className="text-gray-600">
+              Password sementara baru ini hanya ditampilkan sekali. Simpan dan
+              bagikan kepada Tentor secara aman.
+            </p>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-xs text-amber-800">{createdAccount.email}</p>
+              <p className="mt-2 break-all font-mono text-base font-semibold text-navy-900">
+                {createdAccount.temporaryPassword}
+              </p>
+            </div>
+            <p className="text-xs text-gray-500">
+              Tentor wajib mengganti password saat login pertama.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(
+                    createdAccount.temporaryPassword,
+                  );
+                  setPasswordCopied(true);
+                }}
+                className="rounded border px-4 py-2"
+              >
+                {passwordCopied ? "Tersalin" : "Salin Password"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setCreatedAccount(null)}
+                className="rounded bg-navy-900 px-4 py-2 text-white"
+              >
+                Selesai
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {resetTarget && (
+        <Modal
+          title="Reset Password Tentor?"
+          onClose={() => !resettingPassword && setResetTarget(null)}
+        >
+          <div className="space-y-4 text-sm text-gray-600">
+            <p>
+              Sistem akan membuat password sementara baru. Password sebelumnya
+              dan seluruh sesi login Tentor akan dinonaktifkan. Tentor wajib
+              mengganti password setelah login.
+            </p>
+            {resetError && <p className="text-red-600">{resetError}</p>}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={resettingPassword}
+                onClick={() => setResetTarget(null)}
+                className="rounded border px-4 py-2"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={resettingPassword}
+                onClick={resetTutorPassword}
+                className="rounded bg-navy-900 px-4 py-2 text-white disabled:opacity-60"
+              >
+                {resettingPassword ? "Mereset..." : "Reset Password"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {restoreCandidate && (
+        <Modal
+          title="Tentor pernah terdaftar"
+          onClose={() => !restoring && setRestoreCandidate(null)}
+        >
+          <div className="space-y-4 text-sm text-gray-600">
+            <p>
+              Akun dengan email ini pernah dihapus. Apakah Anda ingin memulihkan
+              akun Tentor tersebut?
+            </p>
+            <p className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+              Riwayat mengajar dan honor tetap dipertahankan. Sistem akan
+              membuat password sementara baru yang hanya ditampilkan sekali.
+            </p>
+            {restoreError && <p className="text-red-600">{restoreError}</p>}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={restoring}
+                onClick={() => setRestoreCandidate(null)}
+                className="rounded border px-4 py-2"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={restoring}
+                onClick={restoreArchivedTutor}
+                className="rounded bg-navy-900 px-4 py-2 text-white disabled:opacity-60"
+              >
+                {restoring ? "Memulihkan..." : "Pulihkan Tentor"}
+              </button>
+            </div>
+          </div>
         </Modal>
       )}
       {removing && (
@@ -374,7 +586,7 @@ export default function AdminTutorsPage() {
       {importOpen && (
         <ImportModal
           title="Import Data Tentor"
-          instructions='File harus berformat .xlsx dengan kolom: Nama, Gelar, No.Telepon, Email, Mata Pelajaran yang diajar. Untuk lebih dari satu mata pelajaran, pisahkan dengan koma (contoh: "Matematika, Fisika"). Setiap akun baru dibuat dengan password default 123456.'
+          instructions='File harus berformat .xlsx dengan kolom: Nama, Gelar, No.Telepon, Email, Mata Pelajaran yang diajar. Untuk lebih dari satu mata pelajaran, pisahkan dengan koma (contoh: "Matematika, Fisika"). Password sementara acak untuk setiap akun akan ditampilkan satu kali setelah import.'
           columns={[
             { key: "name", label: "Nama" },
             { key: "title", label: "Gelar" },

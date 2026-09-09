@@ -3,19 +3,26 @@ import { prisma } from "../utils/prisma";
 import { AppError } from "../utils/errors";
 import { logAudit } from "../utils/auditLog";
 import { nextBusinessCode } from "../utils/businessCode";
+import { randomBytes } from "crypto";
 
 const SALT_ROUNDS = 10;
 
-// Every new tutor account starts with this password (client request: admin
-// no longer types one at creation time) — mustChangePassword forces the
-// tentor to set their own on first login rather than this staying in use.
-export const DEFAULT_TUTOR_PASSWORD = "123456";
+export class TutorLifecycleError extends AppError {
+  code: "TUTOR_ARCHIVED" | "TUTOR_ALREADY_ACTIVE" | "TUTOR_ACCOUNT_CONFLICT";
+  details?: { tutorId: string };
 
-/**
- * Admin creates a tutor account: this is both a User (login credentials,
- * role=TENTOR) and a Tutor profile, created atomically.
- */
-export async function createTutor(data: {
+  constructor(
+    message: string,
+    code: TutorLifecycleError["code"],
+    details?: { tutorId: string },
+  ) {
+    super(message, 409);
+    this.code = code;
+    this.details = details;
+  }
+}
+
+export type TutorProvisioningInput = {
   email: string;
   name: string;
   phone?: string;
@@ -25,15 +32,55 @@ export async function createTutor(data: {
   bankHolderName?: string;
   title?: string;
   subjectIds: string[];
-}) {
+};
+
+/** 96 bits of CSPRNG entropy, encoded as 16 URL-safe characters. */
+export function generateTemporaryPassword() {
+  return randomBytes(12).toString("base64url");
+}
+
+/**
+ * Admin creates a tutor account: this is both a User (login credentials,
+ * role=TENTOR) and a Tutor profile, created atomically.
+ */
+export async function createTutor(data: TutorProvisioningInput) {
   const existing = await prisma.user.findUnique({
     where: { email: data.email },
+    include: { tutor: { select: { id: true, deletedAt: true } } },
   });
-  if (existing) throw new AppError("Email sudah terdaftar", 409);
+  if (existing) {
+    if (
+      existing.role === "TENTOR" &&
+      existing.tutor?.deletedAt &&
+      !existing.isActive
+    ) {
+      throw new TutorLifecycleError(
+        "Akun dengan email ini pernah dihapus dan dapat dipulihkan.",
+        "TUTOR_ARCHIVED",
+        { tutorId: existing.tutor.id },
+      );
+    }
+    if (
+      existing.role === "TENTOR" &&
+      existing.tutor &&
+      !existing.tutor.deletedAt &&
+      existing.isActive
+    ) {
+      throw new TutorLifecycleError(
+        "Email sudah digunakan oleh Tentor aktif.",
+        "TUTOR_ALREADY_ACTIVE",
+      );
+    }
+    throw new TutorLifecycleError(
+      "Email sudah digunakan oleh akun lain atau memiliki status yang tidak konsisten.",
+      "TUTOR_ACCOUNT_CONFLICT",
+    );
+  }
 
-  const passwordHash = await bcrypt.hash(DEFAULT_TUTOR_PASSWORD, SALT_ROUNDS);
+  const temporaryPassword = generateTemporaryPassword();
+  const passwordHash = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
 
-  return prisma.$transaction(async (tx) => {
+  const tutor = await prisma.$transaction(async (tx) => {
     const subjectIds = [...new Set(data.subjectIds)];
     const subjects = await tx.subject.findMany({
       where: { id: { in: subjectIds }, isActive: true },
@@ -82,29 +129,199 @@ export async function createTutor(data: {
       },
     });
   });
+  return { tutor, temporaryPassword };
 }
 
-/** Admin-only password recovery for an existing Tutor account. */
-export async function resetTutorPassword(
+export async function restoreTutor(
   id: string,
-  newPassword: string,
   adminId: string,
+  profile?: Omit<TutorProvisioningInput, "email">,
 ) {
+  const temporaryPassword = generateTemporaryPassword();
+  const passwordHash = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
+
+  const tutor = await prisma.$transaction(async (tx) => {
+    const archived = await tx.tutor.findUnique({
+      where: { id },
+      include: { user: true },
+    });
+    if (!archived) throw new AppError("Tentor tidak ditemukan.", 404);
+    if (
+      archived.user.role !== "TENTOR" ||
+      !archived.deletedAt ||
+      archived.user.isActive
+    ) {
+      throw new TutorLifecycleError(
+        "Akun Tentor tidak berada dalam kondisi arsip yang aman untuk dipulihkan.",
+        "TUTOR_ACCOUNT_CONFLICT",
+      );
+    }
+
+    const subjectIds = profile ? [...new Set(profile.subjectIds)] : undefined;
+    if (subjectIds) {
+      const subjects = await tx.subject.findMany({
+        where: { id: { in: subjectIds }, isActive: true },
+        select: { id: true },
+      });
+      if (subjects.length !== subjectIds.length)
+        throw new AppError(
+          "Satu atau lebih mata pelajaran tidak ditemukan atau tidak aktif.",
+          400,
+        );
+    }
+
+    // Atomically claim this archived profile. Concurrent restore attempts
+    // cannot both succeed and return different one-time passwords.
+    const claimed = await tx.tutor.updateMany({
+      where: { id: archived.id, deletedAt: { not: null } },
+      data: { deletedAt: null, status: "ACTIVE" },
+    });
+    if (claimed.count !== 1) {
+      throw new TutorLifecycleError(
+        "Akun Tentor sudah dipulihkan atau statusnya telah berubah.",
+        "TUTOR_ACCOUNT_CONFLICT",
+      );
+    }
+
+    await tx.user.update({
+      where: { id: archived.userId },
+      data: {
+        passwordHash,
+        isActive: true,
+        deletedAt: null,
+        mustChangePassword: true,
+        authVersion: { increment: 1 },
+      },
+    });
+
+    if (subjectIds) {
+      await tx.tutorSubject.deleteMany({ where: { tutorId: archived.id } });
+      await tx.tutorSubject.createMany({
+        data: subjectIds.map((subjectId) => ({
+          tutorId: archived.id,
+          subjectId,
+        })),
+      });
+    }
+
+    const restored = await tx.tutor.update({
+      where: { id: archived.id },
+      data: {
+        ...(profile
+          ? {
+              name: profile.name,
+              phone: profile.phone,
+              hireDate: profile.hireDate,
+              bankAccount: profile.bankAccount,
+              bankName: profile.bankName,
+              bankHolderName: profile.bankHolderName,
+              title: profile.title,
+            }
+          : {}),
+      },
+      include: {
+        user: { select: { email: true, isActive: true, lastLogin: true } },
+        subjects: {
+          include: { subject: { select: { id: true, name: true } } },
+        },
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        tableName: "tutors",
+        recordId: archived.id,
+        action: "UPDATE",
+        oldValues: { status: archived.status, deletedAt: archived.deletedAt },
+        newValues: { status: "ACTIVE", deletedAt: null },
+        changedBy: adminId,
+        reason: "TUTOR_RESTORED",
+      },
+    });
+    return restored;
+  });
+
+  return { tutor, temporaryPassword };
+}
+
+export async function provisionTutorFromImport(
+  data: TutorProvisioningInput,
+  adminId: string,
+): Promise<
+  | { status: "CREATED" | "RESTORED"; temporaryPassword: string }
+  | { status: "ALREADY_ACTIVE" }
+> {
+  const existing = await prisma.user.findUnique({
+    where: { email: data.email },
+    include: { tutor: { select: { id: true, deletedAt: true } } },
+  });
+  if (!existing) {
+    const created = await createTutor(data);
+    return { status: "CREATED", temporaryPassword: created.temporaryPassword };
+  }
+  if (
+    existing.role === "TENTOR" &&
+    existing.tutor &&
+    !existing.tutor.deletedAt &&
+    existing.isActive
+  ) {
+    return { status: "ALREADY_ACTIVE" };
+  }
+  if (
+    existing.role === "TENTOR" &&
+    existing.tutor?.deletedAt &&
+    !existing.isActive
+  ) {
+    const restored = await restoreTutor(existing.tutor.id, adminId, {
+      name: data.name,
+      phone: data.phone,
+      hireDate: data.hireDate,
+      bankAccount: data.bankAccount,
+      bankName: data.bankName,
+      bankHolderName: data.bankHolderName,
+      title: data.title,
+      subjectIds: data.subjectIds,
+    });
+    return {
+      status: "RESTORED",
+      temporaryPassword: restored.temporaryPassword,
+    };
+  }
+  throw new TutorLifecycleError(
+    "Email digunakan oleh akun lain atau memiliki status yang tidak konsisten.",
+    "TUTOR_ACCOUNT_CONFLICT",
+  );
+}
+
+/**
+ * Admin-only credential reset. This never recovers an old password: it
+ * replaces it with a new one-time password and revokes all existing tokens.
+ */
+export async function resetTutorPassword(id: string, adminId: string) {
+  const temporaryPassword = generateTemporaryPassword();
+  const passwordHash = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
+
   return prisma.$transaction(async (tx) => {
     const tutor = await tx.tutor.findUnique({
       where: { id },
-      include: { user: { select: { id: true } } },
+      include: { user: { select: { id: true, deletedAt: true } } },
     });
     if (!tutor) throw new AppError("Tentor tidak ditemukan.", 404);
     if (!tutor.user) throw new AppError("Akun tentor tidak ditemukan.", 404);
+    if (tutor.deletedAt || tutor.user.deletedAt)
+      throw new AppError(
+        "Tentor yang diarsipkan harus dipulihkan sebelum password dapat direset.",
+        409,
+      );
 
     await tx.user.update({
       where: { id: tutor.user.id },
       // Admin set this value on the tentor's behalf, same as account
       // creation — force them to set their own on next login.
       data: {
-        passwordHash: await bcrypt.hash(newPassword, SALT_ROUNDS),
+        passwordHash,
         mustChangePassword: true,
+        authVersion: { increment: 1 },
       },
     });
     await logAudit(
@@ -113,10 +330,11 @@ export async function resetTutorPassword(
         recordId: tutor.id,
         action: "UPDATE",
         changedBy: adminId,
-        reason: `Reset password akun tentor ${tutor.tutorCode} (${tutor.name})`,
+        reason: "TUTOR_PASSWORD_RESET",
       },
       tx,
     );
+    return { temporaryPassword, mustChangePassword: true };
   });
 }
 

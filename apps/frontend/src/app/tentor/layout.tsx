@@ -87,8 +87,8 @@ export default function TentorLayout({
               <div className="flex items-center gap-3">
                 <NotificationBell href="/tentor/notifications" />
                 <button
-                  onClick={() => {
-                    logout();
+                  onClick={async () => {
+                    await logout();
                     router.push("/login");
                   }}
                   className="min-h-9 rounded-lg px-1 text-xs font-medium text-rose-500 transition hover:bg-rose-50"

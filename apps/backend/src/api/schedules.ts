@@ -4,7 +4,10 @@ import { requireAuth, requireRole } from "../middleware/auth";
 import { handleError, AppError } from "../utils/errors";
 import { prisma } from "../utils/prisma";
 import { logAudit } from "../utils/auditLog";
-import { resolveTutorIdForUser } from "../services/sessionService";
+import {
+  lockTeachingSession,
+  resolveTutorIdForUser,
+} from "../services/sessionService";
 import { createNotification } from "../services/notificationService";
 import { getProgramForSessionType } from "../services/programService";
 import { assertEligiblePrivatePackage } from "../services/privatePackageService";
@@ -898,29 +901,42 @@ router.put(
           privatePackageId,
         });
       }
-      const result = await prisma.teachingSession.update({
-        where: { id: current.id },
-        data: {
-          tutorId: data.tutorId,
-          programId: program.id,
-          subjectId: data.subjectId,
-          privatePackageId:
-            current.sessionType === "PRIVATE"
-              ? (data.privatePackageId ?? current.privatePackageId)
-              : null,
-          sessionDate: new Date(`${data.sessionDate}T00:00:00`),
-          startTime: combineDateTime(data.sessionDate, data.startTime),
-          endTime: combineDateTime(data.sessionDate, data.endTime),
-          mode: data.mode,
-          location: data.mode === "OFFLINE" ? data.location || null : null,
-          updatedBy: req.user!.userId,
-        },
-        include: {
-          tutor: { select: { id: true, name: true } },
-          class: { select: { name: true } },
-          student: { select: { name: true } },
-          subject: { select: { name: true } },
-        },
+      const result = await prisma.$transaction(async (tx) => {
+        await lockTeachingSession(tx, current.id);
+        const latest = await tx.teachingSession.findUnique({
+          where: { id: current.id },
+          select: { status: true },
+        });
+        if (!latest) throw new AppError("Pertemuan tidak ditemukan.", 404);
+        if (!["SCHEDULED", "IN_PROGRESS"].includes(latest.status))
+          throw new AppError(
+            "Pertemuan yang sudah selesai atau dibatalkan tidak dapat diubah.",
+            409,
+          );
+        return tx.teachingSession.update({
+          where: { id: current.id },
+          data: {
+            tutorId: data.tutorId,
+            programId: program.id,
+            subjectId: data.subjectId,
+            privatePackageId:
+              current.sessionType === "PRIVATE"
+                ? (data.privatePackageId ?? current.privatePackageId)
+                : null,
+            sessionDate: new Date(`${data.sessionDate}T00:00:00`),
+            startTime: combineDateTime(data.sessionDate, data.startTime),
+            endTime: combineDateTime(data.sessionDate, data.endTime),
+            mode: data.mode,
+            location: data.mode === "OFFLINE" ? data.location || null : null,
+            updatedBy: req.user!.userId,
+          },
+          include: {
+            tutor: { select: { id: true, name: true } },
+            class: { select: { name: true } },
+            student: { select: { name: true } },
+            subject: { select: { name: true } },
+          },
+        });
       });
 
       const when = formatMeetingWhen(
@@ -965,27 +981,34 @@ router.delete(
   requireRole("ADMIN"),
   async (req: Request, res: Response) => {
     try {
-      const meeting = await prisma.teachingSession.findUnique({
-        where: { id: req.params.id },
-      });
-      if (!meeting) throw new AppError("Pertemuan tidak ditemukan.", 404);
-      if (meeting.status !== "SCHEDULED")
-        throw new AppError(
-          'Hanya pertemuan berstatus "Terjadwal" yang dapat dihapus. Gunakan "Batalkan Pertemuan" untuk pertemuan yang sudah berjalan.',
-          409,
+      const meeting = await prisma.$transaction(async (tx) => {
+        await lockTeachingSession(tx, req.params.id);
+        const current = await tx.teachingSession.findUnique({
+          where: { id: req.params.id },
+        });
+        if (!current) throw new AppError("Pertemuan tidak ditemukan.", 404);
+        if (current.status !== "SCHEDULED")
+          throw new AppError(
+            'Hanya pertemuan berstatus "Terjadwal" yang dapat dihapus. Gunakan "Batalkan Pertemuan" untuk pertemuan yang sudah berjalan.',
+            409,
+          );
+        await tx.teachingSession.delete({ where: { id: current.id } });
+        await logAudit(
+          {
+            tableName: "teaching_sessions",
+            recordId: current.id,
+            action: "DELETE",
+            oldValues: {
+              sessionType: current.sessionType,
+              sessionDate: current.sessionDate.toISOString(),
+              tutorId: current.tutorId,
+            },
+            changedBy: req.user!.userId,
+            reason: "Pertemuan dihapus oleh admin",
+          },
+          tx,
         );
-      await prisma.teachingSession.delete({ where: { id: meeting.id } });
-      await logAudit({
-        tableName: "teaching_sessions",
-        recordId: meeting.id,
-        action: "DELETE",
-        oldValues: {
-          sessionType: meeting.sessionType,
-          sessionDate: meeting.sessionDate.toISOString(),
-          tutorId: meeting.tutorId,
-        },
-        changedBy: req.user!.userId,
-        reason: "Pertemuan dihapus oleh admin",
+        return current;
       });
       if (meeting.tutorId) {
         const tutor = await prisma.tutor.findUnique({

@@ -98,7 +98,10 @@ export async function resetAdminPassword(
   if (target.deletedAt) throw new AppError("Akun Admin sudah dihapus.", 404);
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
   await prisma.$transaction(async (tx) => {
-    await tx.user.update({ where: { id: target.id }, data: { passwordHash } });
+    await tx.user.update({
+      where: { id: target.id },
+      data: { passwordHash, authVersion: { increment: 1 } },
+    });
     await logAudit(
       {
         tableName: "users",

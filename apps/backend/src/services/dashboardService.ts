@@ -1,6 +1,7 @@
 import { prisma } from "../utils/prisma";
 import { getSettings } from "./settingsService";
 import { AppError } from "../utils/errors";
+import { parseBusinessDate } from "../utils/businessDate";
 
 // "Sesi menipis" threshold — not specified numerically in the doc, 3 sessions
 // left is a reasonable early-warning default. Revisit once real usage data exists.
@@ -154,6 +155,163 @@ export async function getAdminMonthlySummary(year: number, month: number) {
     regularSessions,
     privateSessions,
     weekly,
+  };
+}
+
+export type DashboardPeriod =
+  | { mode: "ALL" }
+  | { mode: "DATE"; date: string }
+  | { mode: "MONTH"; year: number; month: number }
+  | { mode: "YEAR"; year: number };
+
+type ChartPoint = { label: string; count: number };
+
+function getDashboardPeriodRange(period: DashboardPeriod) {
+  if (period.mode === "ALL") return null;
+  if (period.mode === "DATE") {
+    const start = parseBusinessDate(period.date);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    return { start, end };
+  }
+  if (period.mode === "MONTH") {
+    if (period.year < 2000 || period.month < 1 || period.month > 12) {
+      throw new AppError("Bulan dan tahun tidak valid.", 400);
+    }
+    return {
+      start: new Date(period.year, period.month - 1, 1),
+      end: new Date(period.year, period.month, 1),
+    };
+  }
+  if (period.year < 2000) throw new AppError("Tahun tidak valid.", 400);
+  return {
+    start: new Date(period.year, 0, 1),
+    end: new Date(period.year + 1, 0, 1),
+  };
+}
+
+function chartForPeriod(
+  period: DashboardPeriod,
+  sessions: Array<{ sessionDate: Date; startTime: Date | null }>,
+): ChartPoint[] {
+  if (period.mode === "MONTH") {
+    const days = new Date(period.year, period.month, 0).getDate();
+    const points = Array.from({ length: Math.ceil(days / 7) }, (_, index) => ({
+      label: `${index * 7 + 1}–${Math.min((index + 1) * 7, days)}`,
+      count: 0,
+    }));
+    sessions.forEach((session) => {
+      points[Math.floor((session.sessionDate.getDate() - 1) / 7)].count++;
+    });
+    return points;
+  }
+  if (period.mode === "YEAR") {
+    const labels = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "Mei",
+      "Jun",
+      "Jul",
+      "Agu",
+      "Sep",
+      "Okt",
+      "Nov",
+      "Des",
+    ];
+    const points = labels.map((label) => ({ label, count: 0 }));
+    sessions.forEach(
+      (session) => points[session.sessionDate.getMonth()].count++,
+    );
+    return points;
+  }
+  if (period.mode === "DATE") {
+    const points = Array.from({ length: 4 }, (_, index) => ({
+      label: `${String(index * 6).padStart(2, "0")}:00`,
+      count: 0,
+    }));
+    sessions.forEach((session) => {
+      const hour = (session.startTime ?? session.sessionDate).getHours();
+      points[Math.min(Math.floor(hour / 6), 3)].count++;
+    });
+    return points;
+  }
+
+  const countsByYear = new Map<number, number>();
+  sessions.forEach((session) => {
+    const year = session.sessionDate.getFullYear();
+    countsByYear.set(year, (countsByYear.get(year) ?? 0) + 1);
+  });
+  return [...countsByYear.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([year, count]) => ({ label: String(year), count }));
+}
+
+/**
+ * Historical dashboard data controlled by one explicit business-date period.
+ * Honor only includes completed sessions and their immutable rate snapshot.
+ */
+export async function getAdminPeriodSummary(period: DashboardPeriod) {
+  const range = getDashboardPeriodRange(period);
+  const periodWhere = range
+    ? { sessionDate: { gte: range.start, lt: range.end } }
+    : {};
+  const completedWhere = { ...periodWhere, status: "COMPLETED" };
+  const [completedSessions, activities] = await Promise.all([
+    prisma.teachingSession.findMany({
+      where: completedWhere,
+      select: {
+        sessionDate: true,
+        startTime: true,
+        sessionType: true,
+        honorRateSnapshot: true,
+      },
+    }),
+    prisma.teachingSession.findMany({
+      where: periodWhere,
+      include: {
+        tutor: { select: { name: true } },
+        class: { select: { name: true } },
+        student: { select: { name: true } },
+        subject: { select: { name: true } },
+        schedule: { select: { startTime: true } },
+      },
+      orderBy: [{ sessionDate: "desc" }, { createdAt: "desc" }],
+      take: 12,
+    }),
+  ]);
+
+  const regularSessions = completedSessions.filter(
+    (session) => session.sessionType === "REGULAR",
+  ).length;
+  const privateSessions = completedSessions.filter(
+    (session) => session.sessionType === "PRIVATE",
+  ).length;
+  const estimatedHonor = completedSessions.reduce(
+    (total, session) => total + Number(session.honorRateSnapshot ?? 0),
+    0,
+  );
+
+  return {
+    completedSessions: completedSessions.length,
+    regularSessions,
+    privateSessions,
+    estimatedHonor,
+    chart: chartForPeriod(period, completedSessions),
+    activities: activities.sort((left, right) => {
+      const leftTime = (
+        left.startTime ??
+        left.schedule?.startTime ??
+        left.createdAt
+      ).getTime();
+      const rightTime = (
+        right.startTime ??
+        right.schedule?.startTime ??
+        right.createdAt
+      ).getTime();
+      return rightTime - leftTime;
+    }),
   };
 }
 

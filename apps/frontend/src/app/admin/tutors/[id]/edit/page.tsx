@@ -38,12 +38,6 @@ export default function EditTutorPage() {
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [showReset, setShowReset] = useState(false);
-  const [resetPassword, setResetPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [resetError, setResetError] = useState("");
-  const [resetSaving, setResetSaving] = useState(false);
-  const [resetSuccess, setResetSuccess] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -114,30 +108,6 @@ export default function EditTutorPage() {
       );
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function submitResetPassword(event: React.FormEvent) {
-    event.preventDefault();
-    setResetError("");
-    if (resetPassword.length < 6)
-      return setResetError("Password minimal 6 karakter.");
-    if (resetPassword !== confirmPassword)
-      return setResetError("Konfirmasi password tidak cocok.");
-    setResetSaving(true);
-    try {
-      await api.patch(`/tutors/${id}/password`, { newPassword: resetPassword });
-      setShowReset(false);
-      setResetPassword("");
-      setConfirmPassword("");
-      setResetSuccess("Password tentor berhasil direset.");
-    } catch (requestError: any) {
-      setResetError(
-        requestError.response?.data?.message ||
-          "Gagal mereset password tentor.",
-      );
-    } finally {
-      setResetSaving(false);
     }
   }
 
@@ -262,97 +232,6 @@ export default function EditTutorPage() {
           </div>
         </form>
       </SectionCard>
-      <SectionCard
-        title="Keamanan Akun"
-        description="Kelola akses login tanpa mengubah profil tentor."
-      >
-        <div className="space-y-4">
-          {resetSuccess && (
-            <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-              {resetSuccess}
-            </p>
-          )}
-          <FormField label="Email Akun">
-            <input
-              value={tutor.user.email}
-              disabled
-              className="h-10 w-full rounded-lg border bg-slate-50 px-3 text-sm text-gray-500"
-            />
-          </FormField>
-          <FormField label="Password">
-            <input
-              value="••••••••••••"
-              disabled
-              className="h-10 w-full rounded-lg border bg-slate-50 px-3 text-sm text-gray-500"
-            />
-          </FormField>
-          <button
-            type="button"
-            onClick={() => {
-              setResetError("");
-              setShowReset(true);
-            }}
-            className="rounded-lg border border-navy-300 px-4 py-2 text-sm font-medium text-navy-800 hover:bg-navy-50"
-          >
-            Reset Password
-          </button>
-        </div>
-      </SectionCard>
-      {showReset && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
-          <form
-            onSubmit={submitResetPassword}
-            className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl"
-          >
-            <h2 className="text-lg font-semibold text-gray-900">
-              Reset Password Tentor
-            </h2>
-            <p className="mt-1 text-sm text-gray-600">
-              Atur password baru untuk {tutor.name}. Tentor akan diminta
-              mengganti password ini lagi saat login berikutnya.
-            </p>
-            <div className="mt-5 space-y-4">
-              <FormField label="Password Baru *">
-                <input
-                  autoFocus
-                  type="password"
-                  value={resetPassword}
-                  onChange={(event) => setResetPassword(event.target.value)}
-                  disabled={resetSaving}
-                  className="h-10 w-full rounded-lg border px-3 text-sm"
-                />
-              </FormField>
-              <FormField label="Konfirmasi Password Baru *">
-                <input
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
-                  disabled={resetSaving}
-                  className="h-10 w-full rounded-lg border px-3 text-sm"
-                />
-              </FormField>
-              {resetError && (
-                <p className="text-sm text-red-600">{resetError}</p>
-              )}
-            </div>
-            <div className="mt-6 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => !resetSaving && setShowReset(false)}
-                className="rounded-lg border px-4 py-2 text-sm"
-              >
-                Batal
-              </button>
-              <button
-                disabled={resetSaving}
-                className="rounded-lg bg-navy-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
-              >
-                {resetSaving ? "Mereset..." : "Reset Password"}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
     </div>
   );
 }

@@ -68,6 +68,14 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    if (
+      error.response?.status === 403 &&
+      error.response?.data?.code === "PASSWORD_CHANGE_REQUIRED" &&
+      typeof window !== "undefined" &&
+      window.location.pathname !== "/tentor/profile"
+    ) {
+      window.location.href = "/tentor/profile?forced=1";
+    }
     if (error.response?.status === 401 && typeof window !== "undefined") {
       localStorage.removeItem("absensiku_token");
       localStorage.removeItem("absensiku_user");

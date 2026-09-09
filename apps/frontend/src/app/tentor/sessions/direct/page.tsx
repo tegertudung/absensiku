@@ -24,10 +24,8 @@ type Program = Option & {
 };
 type StudentOption = Option & {
   studentCode: string;
-  programEnrollments?: Array<{
+  programEnrollments: Array<{
     programId: string;
-    status: string;
-    program: { learningModel: string; isActive: boolean };
   }>;
 };
 type Form = {
@@ -99,7 +97,8 @@ export default function Page() {
   useEffect(() => {
     const scheduleId = searchParams.get("scheduleId");
     const sessionDate = searchParams.get("sessionDate");
-    if (scheduleId) set({ scheduleId, ...(sessionDate ? { sessionDate } : {}) });
+    if (scheduleId)
+      set({ scheduleId, ...(sessionDate ? { sessionDate } : {}) });
   }, [searchParams]);
   const selectedProgram = programs.find(
     (program) => program.id === form.programId,
@@ -107,10 +106,8 @@ export default function Page() {
   const privateSession = selectedProgram?.learningModel === "INDIVIDUAL",
     duration = dur(form.startTime, form.endTime);
   const eligibleStudents = students.filter((student) =>
-    student.programEnrollments?.some(
-      (enrollment) =>
-        enrollment.status === "ACTIVE" &&
-        enrollment.programId === form.programId,
+    student.programEnrollments.some(
+      (enrollment) => enrollment.programId === form.programId,
     ),
   );
   const selected = useMemo(
@@ -145,11 +142,7 @@ export default function Page() {
     ])
       .then(([c, s, m, p]) => {
         setClasses(c.data.data.filter((x: any) => x.status === "ACTIVE"));
-        setStudents(
-          s.data.data.filter(
-            (x: StudentOption & { status: string }) => x.status === "ACTIVE",
-          ),
-        );
+        setStudents(s.data.data);
         setSubjects(m.data.data.filter((x: any) => x.isActive));
         setPrograms(p.data.data);
       })

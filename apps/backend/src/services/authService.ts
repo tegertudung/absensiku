@@ -10,12 +10,38 @@ import { prisma } from "../utils/prisma";
  */
 function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET;
+  validateJwtSecret(secret, process.env.NODE_ENV);
+  return secret as string;
+}
 
-  if (!secret) {
-    throw new Error("JWT_SECRET wajib dikonfigurasi.");
+const KNOWN_JWT_SECRET_PLACEHOLDERS = new Set([
+  "your-super-secret-key-here",
+  "CHANGE_ME_USE_A_RANDOM_SECRET_AT_LEAST_32_BYTES",
+]);
+
+/** Fail closed when an example/weak signing key reaches a running backend. */
+export function validateJwtSecret(
+  secret: string | undefined,
+  nodeEnv: string | undefined,
+): void {
+  if (!secret || !secret.trim()) {
+    throw new Error(
+      "Invalid JWT configuration: JWT_SECRET wajib dikonfigurasi.",
+    );
   }
-
-  return secret;
+  if (
+    KNOWN_JWT_SECRET_PLACEHOLDERS.has(secret) ||
+    /^(change[_-]?me|replace[_-]?me|example|your[_-])/i.test(secret)
+  ) {
+    throw new Error(
+      "Invalid JWT configuration: JWT_SECRET harus menggunakan nilai unik yang aman.",
+    );
+  }
+  if (nodeEnv === "production" && Buffer.byteLength(secret, "utf8") < 32) {
+    throw new Error(
+      "Invalid JWT configuration: JWT_SECRET production minimal 32 byte.",
+    );
+  }
 }
 
 const JWT_SECRET = getJwtSecret();
@@ -29,7 +55,9 @@ export interface JwtPayload {
   userId: string;
   email: string;
   role: "ADMIN" | "TENTOR" | "PARENT";
+  authVersion: number;
   isPrimaryAdmin?: boolean;
+  mustChangePassword?: boolean;
 }
 
 export class AuthError extends Error {
@@ -88,6 +116,7 @@ export async function login(email: string, password: string) {
     userId: user.id,
     email: user.email,
     role: user.role as JwtPayload["role"],
+    authVersion: user.authVersion,
   });
 
   return {
@@ -139,6 +168,7 @@ export async function register(
     userId: user.id,
     email: user.email,
     role: user.role as JwtPayload["role"],
+    authVersion: user.authVersion,
   });
 
   return {
@@ -188,14 +218,47 @@ export async function changePassword(
 
   const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
 
-  await prisma.user.update({
+  const updated = await prisma.user.update({
     where: {
       id: userId,
     },
     data: {
       passwordHash,
       mustChangePassword: false,
+      authVersion: { increment: 1 },
     },
+    select: {
+      id: true,
+      email: true,
+      role: true,
+      isPrimaryAdmin: true,
+      mustChangePassword: true,
+      authVersion: true,
+    },
+  });
+
+  return {
+    token: generateToken({
+      userId: updated.id,
+      email: updated.email,
+      role: updated.role as JwtPayload["role"],
+      authVersion: updated.authVersion,
+    }),
+    user: {
+      id: updated.id,
+      email: updated.email,
+      role: updated.role,
+      isPrimaryAdmin: updated.isPrimaryAdmin,
+      mustChangePassword: updated.mustChangePassword,
+    },
+  };
+}
+
+/** Logout is intentionally account-wide for this small deployment. */
+export async function logout(userId: string) {
+  await prisma.user.update({
+    where: { id: userId },
+    data: { authVersion: { increment: 1 } },
   });
 }
 
@@ -231,6 +294,7 @@ export function verifyToken(token: string): JwtPayload {
     const userId = decoded.userId;
     const email = decoded.email;
     const role = decoded.role;
+    const authVersion = decoded.authVersion;
 
     if (typeof userId !== "string" || !/^[0-9a-f-]{36}$/i.test(userId)) {
       throw new Error("Invalid userId claim");
@@ -244,6 +308,10 @@ export function verifyToken(token: string): JwtPayload {
       throw new Error("Invalid role claim");
     }
 
+    if (!Number.isInteger(authVersion) || authVersion < 0) {
+      throw new Error("Invalid authVersion claim");
+    }
+
     /**
      * Jangan cast seluruh decoded token menjadi JwtPayload,
      * karena decoded juga membawa JWT metadata seperti iat/exp.
@@ -254,6 +322,7 @@ export function verifyToken(token: string): JwtPayload {
       userId,
       email,
       role,
+      authVersion,
     };
   } catch {
     throw new AuthError("Token tidak valid atau kedaluwarsa", 401);

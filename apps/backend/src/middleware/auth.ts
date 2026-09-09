@@ -15,7 +15,7 @@ declare global {
  * Verifies the Bearer token and attaches the decoded payload to req.user.
  * Use on any route that requires a logged-in user.
  */
-export async function requireAuth(
+export async function authenticate(
   req: Request,
   res: Response,
   next: NextFunction,
@@ -41,6 +41,8 @@ export async function requireAuth(
         isActive: true,
         isPrimaryAdmin: true,
         deletedAt: true,
+        mustChangePassword: true,
+        authVersion: true,
         tutor: { select: { status: true, deletedAt: true } },
       },
     });
@@ -51,29 +53,58 @@ export async function requireAuth(
       (user.role === "TENTOR" &&
         (!user.tutor || user.tutor.deletedAt || user.tutor.status !== "ACTIVE"))
     ) {
-      return res
-        .status(401)
-        .json({
-          error: "Unauthorized",
-          message: "Akun tidak aktif atau tidak tersedia.",
-        });
+      return res.status(401).json({
+        error: "Unauthorized",
+        message: "Akun tidak aktif atau tidak tersedia.",
+      });
+    }
+    if (payload.authVersion !== user.authVersion) {
+      return res.status(401).json({
+        error: "Unauthorized",
+        message: "Token tidak valid atau sudah dicabut.",
+      });
     }
     req.user = {
       userId: user.id,
       email: user.email,
       role: user.role as JwtPayload["role"],
       isPrimaryAdmin: user.isPrimaryAdmin,
+      authVersion: user.authVersion,
+      mustChangePassword: user.mustChangePassword,
     };
     next();
   } catch (err) {
     const status = err instanceof AuthError ? err.status : 401;
-    return res
-      .status(status)
-      .json({
-        error: "Unauthorized",
-        message: "Token tidak valid atau akun tidak tersedia.",
-      });
+    return res.status(status).json({
+      error: "Unauthorized",
+      message: "Token tidak valid atau akun tidak tersedia.",
+    });
   }
+}
+
+/** Prevent restricted first-login/reset accounts from using business APIs. */
+export function requirePasswordChanged(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  if (req.user?.mustChangePassword) {
+    return res.status(403).json({
+      error: "Forbidden",
+      code: "PASSWORD_CHANGE_REQUIRED",
+      message: "Password harus diganti sebelum melanjutkan.",
+    });
+  }
+  next();
+}
+
+/** Default authenticated boundary for every normal business route. */
+export async function requireAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+  return authenticate(req, res, () => requirePasswordChanged(req, res, next));
 }
 
 /**
@@ -111,12 +142,10 @@ export function requirePrimaryAdmin(
       .json({ error: "Unauthorized", message: "Belum login" });
   }
   if (req.user.role !== "ADMIN" || req.user.isPrimaryAdmin !== true) {
-    return res
-      .status(403)
-      .json({
-        error: "Forbidden",
-        message: "Hanya Admin Utama yang dapat mengelola akun Admin.",
-      });
+    return res.status(403).json({
+      error: "Forbidden",
+      message: "Hanya Admin Utama yang dapat mengelola akun Admin.",
+    });
   }
   next();
 }

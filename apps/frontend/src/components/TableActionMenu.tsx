@@ -16,6 +16,12 @@ type AdminTableActionsProps = {
   onMenuAction?: () => void;
   menuActionTone?: "default" | "destructive";
   onDelete?: () => void;
+  overflowActions?: Array<{
+    label: string;
+    onClick: () => void;
+    tone?: "default" | "destructive";
+    dividerBefore?: boolean;
+  }>;
 };
 
 const actionClassName =
@@ -33,6 +39,7 @@ export default function AdminTableActions({
   onMenuAction,
   menuActionTone = "default",
   onDelete,
+  overflowActions,
 }: AdminTableActionsProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -43,7 +50,18 @@ export default function AdminTableActions({
     if (!rect) return;
 
     const menuWidth = 112;
-    const menuHeight = 44;
+    const actions =
+      overflowActions ||
+      (onDelete || onMenuAction
+        ? [
+            {
+              label: menuActionLabel || "Hapus",
+              onClick: onMenuAction || onDelete!,
+              tone: menuActionTone,
+            },
+          ]
+        : []);
+    const menuHeight = Math.max(44, actions.length * 36 + 8);
     const viewportPadding = 8;
     const left = Math.max(
       viewportPadding,
@@ -76,6 +94,18 @@ export default function AdminTableActions({
     };
   }, [open]);
 
+  const actions =
+    overflowActions ||
+    (onDelete || onMenuAction
+      ? [
+          {
+            label: menuActionLabel || "Hapus",
+            onClick: onMenuAction || onDelete!,
+            tone: menuActionTone,
+          },
+        ]
+      : []);
+
   return (
     <div className="inline-flex items-center gap-1 whitespace-nowrap text-left">
       {detailHref && (
@@ -103,7 +133,7 @@ export default function AdminTableActions({
           {manageLabel}
         </button>
       )}
-      {(onDelete || onMenuAction) && (
+      {actions.length > 0 && (
         <>
           <button
             ref={triggerRef}
@@ -123,25 +153,32 @@ export default function AdminTableActions({
             createPortal(
               <div
                 role="menu"
-                className="fixed z-[100] w-28 rounded-lg border border-gray-200 bg-white p-1 text-left shadow-lg"
+                className="fixed z-[100] w-36 rounded-lg border border-gray-200 bg-white p-1 text-left shadow-lg"
                 style={position}
                 onMouseDown={(event) => event.stopPropagation()}
               >
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setOpen(false);
-                    (onMenuAction || onDelete)?.();
-                  }}
-                  className={`block w-full rounded-md px-3 py-2 text-left text-xs font-medium transition-colors focus:outline-none focus:ring-2 ${
-                    menuActionTone === "destructive"
-                      ? "text-red-600 hover:bg-red-50 focus:ring-red-200"
-                      : "text-gray-700 hover:bg-gray-50 focus:ring-navy-200"
-                  }`}
-                >
-                  {menuActionLabel || "Hapus"}
-                </button>
+                {actions.map((action) => (
+                  <div
+                    key={action.label}
+                    className={action.dividerBefore ? "mt-1 border-t pt-1" : ""}
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setOpen(false);
+                        action.onClick();
+                      }}
+                      className={`block w-full rounded-md px-3 py-2 text-left text-xs font-medium transition-colors focus:outline-none focus:ring-2 ${
+                        action.tone === "destructive"
+                          ? "text-red-600 hover:bg-red-50 focus:ring-red-200"
+                          : "text-gray-700 hover:bg-gray-50 focus:ring-navy-200"
+                      }`}
+                    >
+                      {action.label}
+                    </button>
+                  </div>
+                ))}
               </div>,
               document.body,
             )}

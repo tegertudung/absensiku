@@ -216,6 +216,16 @@ type SessionRecord = {
 };
 type Tx = Prisma.TransactionClient;
 
+/**
+ * Every transition that can conflict with completion serializes on this same
+ * transaction-scoped PostgreSQL advisory lock. The caller must re-read the
+ * session after acquiring it; a pre-lock read is never an authorization for a
+ * later write.
+ */
+export async function lockTeachingSession(tx: Tx, sessionId: string) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`session:${sessionId}`}))`;
+}
+
 async function finalizeTeachingSession(
   tx: Tx,
   sessionId: string,
@@ -225,7 +235,7 @@ async function finalizeTeachingSession(
   enforceOverdue = true,
   validationApproval = false,
 ) {
-  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`session:${sessionId}`}))`;
+  await lockTeachingSession(tx, sessionId);
   const session = await tx.teachingSession.findUnique({
     where: { id: sessionId },
     include: {
@@ -253,6 +263,17 @@ async function finalizeTeachingSession(
     throw new SessionError(
       `Sesi berstatus "${session.status}" tidak dapat diselesaikan`,
       409,
+    );
+  }
+
+  // This is the common completion boundary for individual, batch, direct
+  // occurrence and admin-validation completion. Keep date-only comparison in
+  // the business-timezone helper: no completion side effects may be created
+  // for a future business date.
+  if (isAfterBusinessDate(session.sessionDate, new Date())) {
+    throw new SessionError(
+      "Sesi mengajar tidak dapat diselesaikan sebelum tanggal sesinya.",
+      422,
     );
   }
 
@@ -866,23 +887,26 @@ export async function saveSessionDraft(
   },
   actingTutorId?: string | null,
 ) {
-  const session = await prisma.teachingSession.findUnique({
-    where: { id: sessionId },
-  });
-  if (!session) throw new SessionError("Sesi tidak ditemukan", 404);
-  assertOwnership(actingTutorId, session.tutorId);
-  if (!OPEN_STATUSES.includes(session.status))
-    throw new SessionError("Sesi tidak dapat diubah", 409);
-  if (actingTutorId && isOverdue(session.sessionDate))
-    throw new SessionError("Sesi sudah terkunci dari tentor.", 409);
-  return prisma.teachingSession.update({
-    where: { id: sessionId },
-    data: {
-      material: data.material?.trim() || null,
-      teachingNotes: data.teachingNotes?.trim() || null,
-      progressNotes: data.progressNotes?.trim() || null,
-      score: data.score ?? null,
-    },
+  return prisma.$transaction(async (tx) => {
+    await lockTeachingSession(tx, sessionId);
+    const session = await tx.teachingSession.findUnique({
+      where: { id: sessionId },
+    });
+    if (!session) throw new SessionError("Sesi tidak ditemukan", 404);
+    assertOwnership(actingTutorId, session.tutorId);
+    if (!OPEN_STATUSES.includes(session.status))
+      throw new SessionError("Sesi tidak dapat diubah", 409);
+    if (actingTutorId && isOverdue(session.sessionDate))
+      throw new SessionError("Sesi sudah terkunci dari tentor.", 409);
+    return tx.teachingSession.update({
+      where: { id: sessionId },
+      data: {
+        material: data.material?.trim() || null,
+        teachingNotes: data.teachingNotes?.trim() || null,
+        progressNotes: data.progressNotes?.trim() || null,
+        score: data.score ?? null,
+      },
+    });
   });
 }
 
@@ -951,7 +975,7 @@ export async function reportCancellation(
   actingTutorId?: string | null,
 ) {
   const validation = await prisma.$transaction(async (tx) => {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`session:${sessionId}`}))`;
+    await lockTeachingSession(tx, sessionId);
     const session = await tx.teachingSession.findUnique({
       where: { id: sessionId },
     });
@@ -1051,33 +1075,39 @@ export async function cancelScheduledSessionByAdmin(
   reason: string,
   adminId: string,
 ) {
-  const session = await prisma.teachingSession.findUnique({
-    where: { id: sessionId },
-  });
-  if (!session) throw new SessionError("Sesi tidak ditemukan", 404);
-  if (!OPEN_STATUSES.includes(session.status)) {
-    throw new SessionError(
-      `Sesi berstatus "${session.status}" tidak dapat dibatalkan`,
-      409,
+  const { result, session } = await prisma.$transaction(async (tx) => {
+    await lockTeachingSession(tx, sessionId);
+    const current = await tx.teachingSession.findUnique({
+      where: { id: sessionId },
+    });
+    if (!current) throw new SessionError("Sesi tidak ditemukan", 404);
+    if (!OPEN_STATUSES.includes(current.status)) {
+      throw new SessionError(
+        `Sesi berstatus "${current.status}" tidak dapat dibatalkan`,
+        409,
+      );
+    }
+    const updated = await tx.teachingSession.update({
+      where: { id: sessionId },
+      data: {
+        status: "CANCELLED_NOT_COUNTED",
+        notes: reason,
+        updatedBy: adminId,
+      },
+    });
+    await logAudit(
+      {
+        tableName: "teaching_sessions",
+        recordId: sessionId,
+        action: "UPDATE",
+        oldValues: { status: current.status },
+        newValues: { status: updated.status },
+        changedBy: adminId,
+        reason: `Pertemuan dibatalkan: ${reason}`,
+      },
+      tx,
     );
-  }
-
-  const result = await prisma.teachingSession.update({
-    where: { id: sessionId },
-    data: {
-      status: "CANCELLED_NOT_COUNTED",
-      notes: reason,
-      updatedBy: adminId,
-    },
-  });
-  await logAudit({
-    tableName: "teaching_sessions",
-    recordId: sessionId,
-    action: "UPDATE",
-    oldValues: { status: session.status },
-    newValues: { status: result.status },
-    changedBy: adminId,
-    reason: `Pertemuan dibatalkan: ${reason}`,
+    return { result: updated, session: current };
   });
 
   // Notifikasi Tentor: admin's own cancellation previously notified nobody
@@ -1151,7 +1181,7 @@ export async function decideValidation(
       where: { id: validationId },
     });
     if (!validation) throw new SessionError("Validasi tidak ditemukan", 404);
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"session:" + validation.sessionId}))`;
+    await lockTeachingSession(tx, validation.sessionId);
     const current = await tx.sessionValidation.findUniqueOrThrow({
       where: { id: validationId },
     });

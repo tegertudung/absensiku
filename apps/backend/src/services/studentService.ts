@@ -289,6 +289,43 @@ export async function listStudents() {
 }
 
 /**
+ * Privacy-preserving directory used by the Tentor direct-session workflow.
+ * Keep this projection explicit: adding fields to Student must never make
+ * them visible to Tentor automatically.
+ *
+ * Direct private sessions intentionally allow a Tentor to select any active
+ * student enrolled in an active individual program. There is no pre-existing
+ * tutor assignment for that workflow, so assignment-based filtering here
+ * would prevent valid direct-session creation.
+ */
+export async function listTutorStudentDirectory() {
+  return prisma.student.findMany({
+    where: {
+      status: "ACTIVE",
+      programEnrollments: {
+        some: {
+          status: "ACTIVE",
+          program: { learningModel: "INDIVIDUAL", isActive: true },
+        },
+      },
+    },
+    select: {
+      id: true,
+      name: true,
+      studentCode: true,
+      programEnrollments: {
+        where: {
+          status: "ACTIVE",
+          program: { learningModel: "INDIVIDUAL", isActive: true },
+        },
+        select: { programId: true },
+      },
+    },
+    orderBy: { name: "asc" },
+  });
+}
+
+/**
  * Explicit admin-only hard delete. The operation is deliberately scoped to
  * student-owned data: private sessions/schedules/packages and enrollments.
  * Shared regular classes, tutors, subjects, and honor configuration are never

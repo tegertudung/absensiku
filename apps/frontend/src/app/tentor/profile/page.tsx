@@ -28,6 +28,7 @@ export default function TentorProfilePage() {
   const searchParams = useSearchParams();
   const forced = searchParams.get("forced") === "1";
   const logout = useAuthStore((state) => state.logout);
+  const setAuth = useAuthStore((state) => state.setAuth);
   const user = useAuthStore((state) => state.user);
   const updateUser = useAuthStore((state) => state.updateUser);
   const [profile, setProfile] = useState<TutorProfile | null>(null);
@@ -46,6 +47,10 @@ export default function TentorProfilePage() {
   const loadProfile = useCallback(async () => {
     setLoading(true);
     setLoadError(false);
+    if (user?.mustChangePassword) {
+      setLoading(false);
+      return;
+    }
     try {
       const response = await api.get("/tutors/me");
       setProfile(response.data.data);
@@ -54,7 +59,7 @@ export default function TentorProfilePage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user?.mustChangePassword]);
 
   useEffect(() => {
     loadProfile();
@@ -73,10 +78,11 @@ export default function TentorProfilePage() {
       return setPwError("Konfirmasi password tidak cocok.");
     setPwSaving(true);
     try {
-      await api.post("/auth/change-password", {
+      const response = await api.post("/auth/change-password", {
         currentPassword: pwForm.currentPassword,
         newPassword: pwForm.newPassword,
       });
+      setAuth(response.data.data.user, response.data.data.token);
       updateUser({ mustChangePassword: false });
       setPwSuccess("Password berhasil diubah.");
       setPwForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
@@ -92,8 +98,8 @@ export default function TentorProfilePage() {
     }
   }
 
-  function handleLogout() {
-    logout();
+  async function handleLogout() {
+    await logout();
     router.push("/login");
   }
 
@@ -120,7 +126,7 @@ export default function TentorProfilePage() {
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           <p className="font-semibold">Ganti password Anda terlebih dahulu</p>
           <p className="mt-1 text-xs leading-5">
-            Ini login pertama Anda dengan password default. Silakan buat
+            Ini login pertama Anda dengan password sementara. Silakan buat
             password baru sebelum melanjutkan.
           </p>
         </div>

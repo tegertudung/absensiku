@@ -21,8 +21,42 @@ export interface ImportModalProps {
   onImported: () => void;
 }
 
-type PreviewRow = Record<string, unknown> & { rowNumber: number; errors: string[] };
-type CommitResult = { created: number; failures: Array<{ rowNumber: number; message: string }> };
+type PreviewRow = Record<string, unknown> & {
+  rowNumber: number;
+  errors: string[];
+};
+type CommitResult = {
+  created: number;
+  restored?: number;
+  alreadyActive?: number;
+  failed?: number;
+  failures: Array<{ rowNumber: number; message: string }>;
+  credentials?: Array<{
+    name?: string;
+    email: string;
+    status?: "CREATED" | "RESTORED";
+    temporaryPassword: string;
+  }>;
+  results?: Array<{
+    rowNumber: number;
+    name: string;
+    email: string;
+    status: "CREATED" | "RESTORED" | "ALREADY_ACTIVE" | "FAILED";
+    message?: string;
+  }>;
+};
+
+const statusLabel = {
+  CREATED: "Dibuat",
+  RESTORED: "Dipulihkan",
+  ALREADY_ACTIVE: "Sudah aktif",
+  FAILED: "Gagal",
+} as const;
+
+function csvCell(value: string) {
+  const formulaSafe = /^[=+\-@]/.test(value) ? `'${value}` : value;
+  return `"${formulaSafe.replace(/"/g, '""')}"`;
+}
 
 function cellText(value: unknown): string {
   if (Array.isArray(value)) return value.join(", ");
@@ -100,6 +134,28 @@ export default function ImportModal({
     setError("");
   }
 
+  function downloadCredentials() {
+    if (!result?.credentials?.length) return;
+    const rows = [
+      ["Nama", "Email", "Temporary Password", "Status"],
+      ...result.credentials.map((credential) => [
+        credential.name || "",
+        credential.email,
+        credential.temporaryPassword,
+        credential.status || "CREATED",
+      ]),
+    ];
+    const csv = `\uFEFF${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}`;
+    const url = URL.createObjectURL(
+      new Blob([csv], { type: "text/csv;charset=utf-8" }),
+    );
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "kredensial-tentor.csv";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <Modal title={title} onClose={onClose}>
       <div className="space-y-4">
@@ -167,7 +223,9 @@ export default function ImportModal({
                       key={row.rowNumber}
                       className={`border-t border-gray-100 ${row.errors.length > 0 ? "bg-red-50" : ""}`}
                     >
-                      <td className="px-3 py-2 text-gray-500">{row.rowNumber}</td>
+                      <td className="px-3 py-2 text-gray-500">
+                        {row.rowNumber}
+                      </td>
                       {columns.map((column) => (
                         <td key={column.key} className="px-3 py-2">
                           {cellText(row[column.key])}
@@ -175,9 +233,13 @@ export default function ImportModal({
                       ))}
                       <td className="px-3 py-2">
                         {row.errors.length === 0 ? (
-                          <span className="font-medium text-emerald-700">Valid</span>
+                          <span className="font-medium text-emerald-700">
+                            Valid
+                          </span>
                         ) : (
-                          <span className="text-red-700">{row.errors.join(" ")}</span>
+                          <span className="text-red-700">
+                            {row.errors.join(" ")}
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -210,12 +272,65 @@ export default function ImportModal({
 
         {result && (
           <>
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
-              {result.created} data berhasil diimpor.
-            </div>
+            {result.results ? (
+              <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
+                <ResultCount label="Dibuat" value={result.created} />
+                <ResultCount label="Dipulihkan" value={result.restored || 0} />
+                <ResultCount
+                  label="Sudah aktif"
+                  value={result.alreadyActive || 0}
+                />
+                <ResultCount
+                  label="Gagal"
+                  value={result.failed ?? result.failures.length}
+                />
+              </div>
+            ) : (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                {result.created} data berhasil diimpor.
+              </div>
+            )}
+            {result.results && (
+              <div className="max-h-52 overflow-auto rounded-lg border border-gray-200">
+                <table className="w-full text-left text-xs">
+                  <thead className="sticky top-0 bg-gray-50 text-gray-500">
+                    <tr>
+                      <th className="px-3 py-2">Baris</th>
+                      <th className="px-3 py-2">Nama</th>
+                      <th className="px-3 py-2">Email</th>
+                      <th className="px-3 py-2">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.results.map((row) => (
+                      <tr key={row.rowNumber} className="border-t">
+                        <td className="px-3 py-2">{row.rowNumber}</td>
+                        <td className="px-3 py-2">{row.name || "-"}</td>
+                        <td className="px-3 py-2">{row.email || "-"}</td>
+                        <td className="px-3 py-2">
+                          <span
+                            className={
+                              row.status === "FAILED"
+                                ? "text-red-700"
+                                : row.status === "ALREADY_ACTIVE"
+                                  ? "text-gray-600"
+                                  : "font-medium text-emerald-700"
+                            }
+                          >
+                            {statusLabel[row.status]}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             {result.failures.length > 0 && (
               <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
-                <p className="font-medium">{result.failures.length} baris gagal:</p>
+                <p className="font-medium">
+                  {result.failures.length} baris gagal:
+                </p>
                 <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs">
                   {result.failures.map((failure) => (
                     <li key={failure.rowNumber}>
@@ -223,6 +338,43 @@ export default function ImportModal({
                     </li>
                   ))}
                 </ul>
+              </div>
+            )}
+            {result.credentials && result.credentials.length > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+                <p className="font-semibold">
+                  Password sementara — tampil sekali
+                </p>
+                <p className="mt-1 text-xs">
+                  Password sementara hanya tersedia pada hasil import ini.
+                  Simpan dan bagikan kepada Tentor secara aman.
+                </p>
+                <button
+                  type="button"
+                  onClick={downloadCredentials}
+                  className="mt-3 rounded-lg bg-amber-900 px-3 py-2 text-xs font-medium text-white"
+                >
+                  Unduh Kredensial
+                </button>
+                <div className="mt-3 max-h-48 space-y-2 overflow-auto">
+                  {result.credentials.map((credential) => (
+                    <div
+                      key={credential.email}
+                      className="rounded border border-amber-200 bg-white px-3 py-2 font-mono text-xs"
+                    >
+                      {credential.name && <p>{credential.name}</p>}
+                      <p className="break-all">{credential.email}</p>
+                      <p className="mt-1 break-all font-semibold">
+                        {credential.temporaryPassword}
+                      </p>
+                      {credential.status && (
+                        <p className="mt-1 font-sans text-amber-700">
+                          {statusLabel[credential.status]}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
             <div className="flex justify-end border-t pt-4">
@@ -238,5 +390,14 @@ export default function ImportModal({
         )}
       </div>
     </Modal>
+  );
+}
+
+function ResultCount({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+      <p className="text-lg font-semibold text-navy-900">{value}</p>
+      <p className="text-xs text-gray-600">{label}</p>
+    </div>
   );
 }

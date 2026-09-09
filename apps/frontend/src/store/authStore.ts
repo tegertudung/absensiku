@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import api from "@/lib/api";
 
 export interface AuthUser {
   id: string;
@@ -14,7 +15,7 @@ interface AuthState {
   isHydrated: boolean;
   setAuth: (user: AuthUser, token: string) => void;
   updateUser: (patch: Partial<AuthUser>) => void;
-  logout: () => void;
+  logout: () => Promise<void>;
   hydrate: () => void;
 }
 
@@ -40,10 +41,25 @@ export const useAuthStore = create<AuthState>((set) => ({
     });
   },
 
-  logout: () => {
+  logout: async () => {
+    const token = localStorage.getItem("absensiku_token");
+    const revokeRequest = token
+      ? api.post("/auth/logout", undefined, {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 5000,
+        })
+      : Promise.resolve();
+
+    // Clear local state immediately. Server revocation is best-effort and
+    // bounded so a network problem cannot leave the user trapped in the UI.
     localStorage.removeItem("absensiku_token");
     localStorage.removeItem("absensiku_user");
     set({ user: null, token: null });
+    try {
+      await revokeRequest;
+    } catch {
+      // A failed/revoked token or a network error must never trap the user.
+    }
   },
 
   // Restore session from localStorage on app load (client-side only).

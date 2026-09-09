@@ -13,6 +13,11 @@
     "lint": "eslint src --ext .ts || true",
     "format": "prettier --write 'src/**/*.ts' || true",
     "test:settings-phase1": "cross-env DOTENV_CONFIG_PATH=.env ts-node -r dotenv/config scripts/test-settings-phase1.ts",
+    "test:auth-security": "ts-node scripts/test-auth-security.ts",
+    "test:student-data-privacy": "ts-node scripts/test-student-data-privacy.ts",
+    "test:tutor-lifecycle": "ts-node scripts/test-tutor-lifecycle.ts",
+    "test:session-integrity": "ts-node scripts/test-session-integrity.ts",
+    "test:session-concurrency": "ts-node scripts/test-session-concurrency.ts",
     "reset:dev-data": "cross-env DOTENV_CONFIG_PATH=.env ts-node -r dotenv/config scripts/reset-dev-data.ts --execute",
     "admin:reset-password": "cross-env DOTENV_CONFIG_PATH=.env ts-node -r dotenv/config scripts/resetAdminPassword.ts"
   },

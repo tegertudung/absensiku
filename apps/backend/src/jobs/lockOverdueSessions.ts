@@ -1,6 +1,7 @@
-import cron from 'node-cron';
-import { prisma } from '../utils/prisma';
-import { OVERDUE_DAYS } from '../services/sessionService';
+import cron from "node-cron";
+import { prisma } from "../utils/prisma";
+import { OVERDUE_DAYS } from "../services/sessionService";
+import { addBusinessDays, formatBusinessDate } from "../utils/businessDate";
 
 /**
  * BR-07 / alur H.4: a tentor has 3 days after the session date to finish
@@ -13,42 +14,59 @@ import { OVERDUE_DAYS } from '../services/sessionService';
  * sessionService both already block tentor edits on that status).
  */
 export async function lockOverdueSessions(): Promise<number> {
-  const cutoff = new Date();
-  cutoff.setUTCHours(0, 0, 0, 0);
-  cutoff.setUTCDate(cutoff.getUTCDate() - OVERDUE_DAYS);
+  const cutoff = addBusinessDays(new Date(), -OVERDUE_DAYS);
 
   const overdue = await prisma.teachingSession.findMany({
     where: {
-      status: { in: ['SCHEDULED', 'IN_PROGRESS'] },
+      status: { in: ["SCHEDULED", "IN_PROGRESS"] },
       sessionDate: { lt: cutoff },
     },
   });
 
-  for (const session of overdue) {
-    await prisma.$transaction(async (tx) => {
+  let lockedCount = 0;
+  for (const candidate of overdue) {
+    const locked = await prisma.$transaction(async (tx) => {
+      // Use the same key as all interactive TeachingSession mutations. The
+      // candidate list is only an optimization; state is authoritative after
+      // this lock is acquired.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`session:${candidate.id}`}))`;
+      const current = await tx.teachingSession.findUnique({
+        where: { id: candidate.id },
+        select: { id: true, status: true, sessionDate: true },
+      });
+      if (
+        !current ||
+        !["SCHEDULED", "IN_PROGRESS"].includes(current.status) ||
+        current.sessionDate >= cutoff
+      )
+        return false;
       await tx.teachingSession.update({
-        where: { id: session.id },
-        data: { status: 'PENDING_ADMIN' },
+        where: { id: current.id },
+        data: { status: "PENDING_ADMIN" },
       });
 
       await tx.sessionValidation.create({
         data: {
-          sessionId: session.id,
-          caseType: 'OVERDUE_COMPLETION',
-          decision: 'PENDING',
-          description: `Sesi tanggal ${
-            session.sessionDate.toISOString().split('T')[0]
-          } melewati batas ${OVERDUE_DAYS} hari tanpa diselesaikan tentor.`,
+          sessionId: current.id,
+          caseType: "OVERDUE_COMPLETION",
+          decision: "PENDING",
+          description: `Sesi tanggal ${formatBusinessDate(
+            current.sessionDate,
+          )} melewati batas ${OVERDUE_DAYS} hari tanpa diselesaikan tentor.`,
         },
       });
+      return true;
     });
+    if (locked) lockedCount += 1;
   }
 
-  if (overdue.length > 0) {
-    console.log(`[lockOverdueSessions] Locked ${overdue.length} overdue session(s)`);
+  if (lockedCount > 0) {
+    console.log(
+      `[lockOverdueSessions] Locked ${lockedCount} overdue session(s)`,
+    );
   }
 
-  return overdue.length;
+  return lockedCount;
 }
 
 /**
@@ -59,8 +77,10 @@ export async function lockOverdueSessions(): Promise<number> {
  * would then fire once per instance, which needs a distributed lock).
  */
 export function startOverdueSessionLockJob() {
-  cron.schedule('0 * * * *', () => {
-    lockOverdueSessions().catch((err) => console.error('[lockOverdueSessions] failed:', err));
+  cron.schedule("0 * * * *", () => {
+    lockOverdueSessions().catch((err) =>
+      console.error("[lockOverdueSessions] failed:", err),
+    );
   });
-  console.log('✓ Overdue session lock job scheduled (hourly)');
+  console.log("✓ Overdue session lock job scheduled (hourly)");
 }

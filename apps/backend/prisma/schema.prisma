@@ -23,9 +23,12 @@ model User {
   isPrimaryAdmin     Boolean   @default(false)
   deletedAt          DateTime?
   // Set whenever an admin sets this account's password for it (new tutor
-  // account created with the "123456" default, or an existing one reset) —
+  // account created with a one-time random password, or an existing one reset) —
   // cleared once the user successfully changes their own password.
   mustChangePassword Boolean   @default(false)
+  // Included in every JWT. Incrementing it revokes every token issued with
+  // the previous value without requiring a server-side token blacklist.
+  authVersion        Int       @default(0)
   lastLogin          DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt

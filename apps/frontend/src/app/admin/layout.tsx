@@ -138,7 +138,9 @@ export default function AdminLayout({
   // not inherit the visual application shell (sidebar, topbar, dashboard
   // padding) in either screen preview or browser print — window.print()
   // would otherwise capture the sidebar too.
-  const isStudentLetterPrint = /^\/admin\/student-letters\/[^/]+\/print$/.test(pathname);
+  const isStudentLetterPrint = /^\/admin\/student-letters\/[^/]+\/print$/.test(
+    pathname,
+  );
   const isHonorSlipPrint = /^\/admin\/recap\/slip\/[^/]+$/.test(pathname);
   const isPrintOnly = isStudentLetterPrint || isHonorSlipPrint;
 
@@ -210,8 +212,8 @@ export default function AdminLayout({
           <p className="text-[11px] text-navy-300">ADMIN</p>
         </div>
         <button
-          onClick={() => {
-            logout();
+          onClick={async () => {
+            await logout();
             router.push("/login");
           }}
           aria-label="Keluar"
@@ -316,7 +318,11 @@ function BrandMark({ logoPath }: { logoPath: string }) {
   const logo = assetUrl(logoPath);
   return (
     <div className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-white/10 ring-1 ring-white/10">
-      <img src="/logo.png" alt="Logo sistem" className="h-full w-full object-cover" />
+      <img
+        src="/logo.png"
+        alt="Logo sistem"
+        className="h-full w-full object-cover"
+      />
       {logo && (
         <img
           src={logo}

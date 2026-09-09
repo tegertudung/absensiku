@@ -4,10 +4,12 @@ import {
   login,
   register,
   changePassword,
+  logout,
   AuthError,
 } from "../services/authService";
 import {
   requireAuth,
+  authenticate,
   requirePrimaryAdmin,
   requireRole,
 } from "../middleware/auth";
@@ -82,7 +84,7 @@ router.post(
 );
 
 // GET /api/auth/me — return current logged-in user
-router.get("/me", requireAuth, async (req: Request, res: Response) => {
+router.get("/me", authenticate, async (req: Request, res: Response) => {
   const user = await prisma.user.findUnique({
     where: { id: req.user!.userId },
     select: {
@@ -93,6 +95,7 @@ router.get("/me", requireAuth, async (req: Request, res: Response) => {
       isPrimaryAdmin: true,
       deletedAt: true,
       lastLogin: true,
+      mustChangePassword: true,
     },
   });
 
@@ -111,7 +114,7 @@ const changePasswordSchema = z.object({
 // POST /api/auth/change-password — any authenticated role
 router.post(
   "/change-password",
-  requireAuth,
+  authenticate,
   async (req: Request, res: Response) => {
     const parsed = changePasswordSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -121,12 +124,12 @@ router.post(
       });
     }
     try {
-      await changePassword(
+      const result = await changePassword(
         req.user!.userId,
         parsed.data.currentPassword,
         parsed.data.newPassword,
       );
-      res.json({ success: true });
+      res.json({ success: true, data: result });
     } catch (err) {
       const status = err instanceof AuthError ? err.status : 500;
       res.status(status).json({
@@ -136,5 +139,20 @@ router.post(
     }
   },
 );
+
+// POST /api/auth/logout — account-wide token revocation, including restricted accounts.
+router.post("/logout", authenticate, async (req: Request, res: Response) => {
+  try {
+    await logout(req.user!.userId);
+    res.json({ success: true });
+  } catch (err) {
+    const status = err instanceof AuthError ? err.status : 500;
+    res.status(status).json({
+      error: "Logout failed",
+      message:
+        status === 500 ? "Gagal keluar dari akun." : (err as Error).message,
+    });
+  }
+});
 
 export default router;
